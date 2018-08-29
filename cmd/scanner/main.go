@@ -20,18 +20,25 @@ import (
 	"github.com/weaveworks/cortex/pkg/util"
 )
 
+type scanner struct {
+	week      int
+	segments  int
+	tableName string
+
+	dynamoDB *dynamodb.DynamoDB
+}
+
 func main() {
 	var (
 		schemaConfig  chunk.SchemaConfig
 		storageConfig storage.Config
 
-		week     int
-		segments int
+		scanner scanner
 	)
 
 	util.RegisterFlags(&storageConfig, &schemaConfig)
-	flag.IntVar(&week, "week", 0, "Week number to scan, e.g. 2497")
-	flag.IntVar(&segments, "segments", 1, "Number of segments to run in parallel")
+	flag.IntVar(&scanner.week, "week", 0, "Week number to scan, e.g. 2497")
+	flag.IntVar(&scanner.segments, "segments", 1, "Number of segments to run in parallel")
 
 	flag.Parse()
 
@@ -39,47 +46,26 @@ func main() {
 	l.Set("debug")
 	util.Logger, _ = util.NewPrometheusLogger(l)
 
-	if week == 0 {
-		week = int(time.Now().Unix() / int64(7*24*time.Hour/time.Second))
+	if scanner.week == 0 {
+		scanner.week = int(time.Now().Unix() / int64(7*24*time.Hour/time.Second))
 	}
 
 	config, err := awscommon.ConfigFromURL(storageConfig.AWSStorageConfig.DynamoDB.URL)
 	checkFatal(err)
 	session := session.New(config)
-	dynamoDB := dynamodb.New(session)
+	scanner.dynamoDB = dynamodb.New(session)
 
 	var group sync.WaitGroup
-	group.Add(segments)
-	var totals summary
+	group.Add(scanner.segments)
+	totals := newSummary()
 	var totalsMutex sync.Mutex
 
-	tableName := fmt.Sprintf("%s%d", schemaConfig.ChunkTables.Prefix, week)
-	fmt.Printf("table %s\n", tableName)
-	for segment := 0; segment < segments; segment++ {
-		go func(thisSegment int) {
-			input := &dynamodb.ScanInput{
-				TableName:            aws.String(tableName),
-				ProjectionExpression: aws.String(hashKey),
-				Segment:              aws.Int64(int64(thisSegment)),
-				TotalSegments:        aws.Int64(int64(segments)),
-				//ReturnConsumedCapacity: aws.String(dynamodb.ReturnConsumedCapacityTotal),
-			}
+	scanner.tableName = fmt.Sprintf("%s%d", schemaConfig.ChunkTables.Prefix, scanner.week)
+	fmt.Printf("table %s\n", scanner.tableName)
+	for segment := 0; segment < scanner.segments; segment++ {
+		go func(segment int) {
 			handler := newHandler()
-
-			for _, arg := range flag.Args() {
-				handler.orgs[arg] = struct{}{}
-			}
-
-			err = dynamoDB.ScanPages(input, handler.handlePage)
-			checkFatal(err)
-
-			delete := &dynamodb.BatchWriteItemInput{
-				RequestItems: map[string][]*dynamodb.WriteRequest{
-					tableName: handler.requests,
-				},
-			}
-			_ = delete
-			//_, err = dynamoDB.BatchWriteItem(delete)
+			err := scanner.segmentScan(segment, handler)
 			checkFatal(err)
 			totalsMutex.Lock()
 			totals.accumulate(handler.summary)
@@ -92,6 +78,34 @@ func main() {
 	totals.print()
 }
 
+func (sc scanner) segmentScan(segment int, handler handler) error {
+	input := &dynamodb.ScanInput{
+		TableName:            aws.String(sc.tableName),
+		ProjectionExpression: aws.String(hashKey),
+		Segment:              aws.Int64(int64(segment)),
+		TotalSegments:        aws.Int64(int64(sc.segments)),
+		//ReturnConsumedCapacity: aws.String(dynamodb.ReturnConsumedCapacityTotal),
+	}
+
+	for _, arg := range flag.Args() {
+		handler.orgs[arg] = struct{}{}
+	}
+
+	err := sc.dynamoDB.ScanPages(input, handler.handlePage)
+	if err != nil {
+		return err
+	}
+
+	delete := &dynamodb.BatchWriteItemInput{
+		RequestItems: map[string][]*dynamodb.WriteRequest{
+			sc.tableName: handler.requests,
+		},
+	}
+	_ = delete
+	//_, err = dynamoDB.BatchWriteItem(delete)
+	return err
+}
+
 /* TODO: delete v8 schema rows for all instances */
 
 const (
@@ -102,6 +116,12 @@ const (
 
 type summary struct {
 	counts map[string]int
+}
+
+func newSummary() summary {
+	return summary{
+		counts: map[string]int{},
+	}
 }
 
 func (s *summary) accumulate(b summary) {
@@ -125,7 +145,7 @@ type handler struct {
 func newHandler() handler {
 	return handler{
 		orgs:    map[string]struct{}{},
-		summary: summary{counts: map[string]int{}},
+		summary: newSummary(),
 	}
 }
 
