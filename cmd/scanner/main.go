@@ -24,13 +24,11 @@ func main() {
 		schemaConfig  chunk.SchemaConfig
 		storageConfig storage.Config
 
-		weekFrom int
-		weekTo   int
+		week int
 	)
 
 	util.RegisterFlags(&storageConfig, &schemaConfig)
-	flag.IntVar(&weekFrom, "week-from", 0, "Week number to start deleting from, e.g. 2497")
-	flag.IntVar(&weekTo, "week-to", 0, "Week number to stop deleting at, e.g. 2512")
+	flag.IntVar(&week, "week", 0, "Week number to scan, e.g. 2497")
 
 	flag.Parse()
 
@@ -38,12 +36,8 @@ func main() {
 	l.Set("debug")
 	util.Logger, _ = util.NewPrometheusLogger(l)
 
-	currentWeek := int(time.Now().Unix() / int64(7*24*time.Hour/time.Second))
-	if weekFrom == 0 {
-		weekFrom = currentWeek
-	}
-	if weekTo == 0 {
-		weekTo = currentWeek
+	if week == 0 {
+		week = int(time.Now().Unix() / int64(7*24*time.Hour/time.Second))
 	}
 
 	handler := newHandler()
@@ -57,32 +51,30 @@ func main() {
 	session := session.New(config)
 	dynamoDB := dynamodb.New(session)
 
-	for week := weekFrom; week <= weekTo; week++ {
-		fmt.Printf("Week %d\n", week)
-		tableName := fmt.Sprintf("%s%d", schemaConfig.ChunkTables.Prefix, week)
-		input := &dynamodb.ScanInput{
-			TableName:            aws.String(tableName),
-			ProjectionExpression: aws.String(hashKey),
-			//ReturnConsumedCapacity: aws.String(dynamodb.ReturnConsumedCapacityTotal),
-		}
-		handler.reset()
-		err := dynamoDB.ScanPages(input, handler.handlePage)
-		checkFatal(err)
-		fmt.Printf("\n")
-
-		for user, count := range handler.counts {
-			fmt.Printf("%s, %d\n", user, count)
-		}
-
-		delete := &dynamodb.BatchWriteItemInput{
-			RequestItems: map[string][]*dynamodb.WriteRequest{
-				tableName: handler.requests,
-			},
-		}
-		_ = delete
-		//_, err = dynamoDB.BatchWriteItem(delete)
-		checkFatal(err)
+	fmt.Printf("Week %d\n", week)
+	tableName := fmt.Sprintf("%s%d", schemaConfig.ChunkTables.Prefix, week)
+	input := &dynamodb.ScanInput{
+		TableName:            aws.String(tableName),
+		ProjectionExpression: aws.String(hashKey),
+		//ReturnConsumedCapacity: aws.String(dynamodb.ReturnConsumedCapacityTotal),
 	}
+	handler.reset()
+	err = dynamoDB.ScanPages(input, handler.handlePage)
+	checkFatal(err)
+	fmt.Printf("\n")
+
+	for user, count := range handler.counts {
+		fmt.Printf("%s, %d\n", user, count)
+	}
+
+	delete := &dynamodb.BatchWriteItemInput{
+		RequestItems: map[string][]*dynamodb.WriteRequest{
+			tableName: handler.requests,
+		},
+	}
+	_ = delete
+	//_, err = dynamoDB.BatchWriteItem(delete)
+	checkFatal(err)
 
 }
 
