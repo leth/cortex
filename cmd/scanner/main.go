@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -24,11 +25,13 @@ func main() {
 		schemaConfig  chunk.SchemaConfig
 		storageConfig storage.Config
 
-		week int
+		week     int
+		segments int
 	)
 
 	util.RegisterFlags(&storageConfig, &schemaConfig)
 	flag.IntVar(&week, "week", 0, "Week number to scan, e.g. 2497")
+	flag.IntVar(&segments, "segments", 1, "Number of segments to run in parallel")
 
 	flag.Parse()
 
@@ -40,42 +43,53 @@ func main() {
 		week = int(time.Now().Unix() / int64(7*24*time.Hour/time.Second))
 	}
 
-	handler := newHandler()
-
-	for _, arg := range flag.Args() {
-		handler.orgs[arg] = struct{}{}
-	}
-
 	config, err := awscommon.ConfigFromURL(storageConfig.AWSStorageConfig.DynamoDB.URL)
 	checkFatal(err)
 	session := session.New(config)
 	dynamoDB := dynamodb.New(session)
 
-	fmt.Printf("Week %d\n", week)
+	var group sync.WaitGroup
+	group.Add(segments)
+	var totals summary
+	var totalsMutex sync.Mutex
+
 	tableName := fmt.Sprintf("%s%d", schemaConfig.ChunkTables.Prefix, week)
-	input := &dynamodb.ScanInput{
-		TableName:            aws.String(tableName),
-		ProjectionExpression: aws.String(hashKey),
-		//ReturnConsumedCapacity: aws.String(dynamodb.ReturnConsumedCapacityTotal),
+	fmt.Printf("table %s\n", tableName)
+	for segment := 0; segment < segments; segment++ {
+		go func(thisSegment int) {
+			input := &dynamodb.ScanInput{
+				TableName:            aws.String(tableName),
+				ProjectionExpression: aws.String(hashKey),
+				Segment:              aws.Int64(int64(thisSegment)),
+				TotalSegments:        aws.Int64(int64(segments)),
+				//ReturnConsumedCapacity: aws.String(dynamodb.ReturnConsumedCapacityTotal),
+			}
+			handler := newHandler()
+
+			for _, arg := range flag.Args() {
+				handler.orgs[arg] = struct{}{}
+			}
+
+			err = dynamoDB.ScanPages(input, handler.handlePage)
+			checkFatal(err)
+
+			delete := &dynamodb.BatchWriteItemInput{
+				RequestItems: map[string][]*dynamodb.WriteRequest{
+					tableName: handler.requests,
+				},
+			}
+			_ = delete
+			//_, err = dynamoDB.BatchWriteItem(delete)
+			checkFatal(err)
+			totalsMutex.Lock()
+			totals.accumulate(handler.summary)
+			totalsMutex.Unlock()
+			group.Done()
+		}(segment)
 	}
-	handler.reset()
-	err = dynamoDB.ScanPages(input, handler.handlePage)
-	checkFatal(err)
+	group.Wait()
 	fmt.Printf("\n")
-
-	for user, count := range handler.counts {
-		fmt.Printf("%s, %d\n", user, count)
-	}
-
-	delete := &dynamodb.BatchWriteItemInput{
-		RequestItems: map[string][]*dynamodb.WriteRequest{
-			tableName: handler.requests,
-		},
-	}
-	_ = delete
-	//_, err = dynamoDB.BatchWriteItem(delete)
-	checkFatal(err)
-
+	totals.print()
 }
 
 /* TODO: delete v8 schema rows for all instances */
@@ -86,16 +100,32 @@ const (
 	valueKey = "c"
 )
 
+type summary struct {
+	counts map[string]int
+}
+
+func (s *summary) accumulate(b summary) {
+	for k, v := range b.counts {
+		s.counts[k] += v
+	}
+}
+
+func (s summary) print() {
+	for user, count := range s.counts {
+		fmt.Printf("%s, %d\n", user, count)
+	}
+}
+
 type handler struct {
 	orgs     map[string]struct{}
 	requests []*dynamodb.WriteRequest
-	counts   map[string]int
+	summary
 }
 
 func newHandler() handler {
 	return handler{
-		orgs:   map[string]struct{}{},
-		counts: map[string]int{},
+		orgs:    map[string]struct{}{},
+		summary: summary{counts: map[string]int{}},
 	}
 }
 
