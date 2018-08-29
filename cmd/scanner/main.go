@@ -28,6 +28,10 @@ type scanner struct {
 	dynamoDB *dynamodb.DynamoDB
 }
 
+var (
+	pagesPerDot int
+)
+
 func main() {
 	var (
 		schemaConfig  chunk.SchemaConfig
@@ -39,6 +43,7 @@ func main() {
 	util.RegisterFlags(&storageConfig, &schemaConfig)
 	flag.IntVar(&scanner.week, "week", 0, "Week number to scan, e.g. 2497")
 	flag.IntVar(&scanner.segments, "segments", 1, "Number of segments to run in parallel")
+	flag.IntVar(&pagesPerDot, "pages-per-dot", 10, "Print a dot per N pages in DynamoDB (0 to disable)")
 
 	flag.Parse()
 
@@ -137,6 +142,7 @@ func (s summary) print() {
 }
 
 type handler struct {
+	pages    int
 	orgs     map[string]struct{}
 	requests []*dynamodb.WriteRequest
 	summary
@@ -155,7 +161,10 @@ func (h *handler) reset() {
 }
 
 func (h *handler) handlePage(page *dynamodb.ScanOutput, lastPage bool) bool {
-	fmt.Printf(".")
+	h.pages++
+	if pagesPerDot > 0 && h.pages%pagesPerDot == 0 {
+		fmt.Printf(".")
+	}
 	for _, m := range page.Items {
 		v := m[hashKey]
 		if v.S != nil {
