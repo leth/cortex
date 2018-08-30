@@ -43,7 +43,7 @@ func main() {
 	)
 
 	util.RegisterFlags(&storageConfig, &schemaConfig)
-	flag.IntVar(&scanner.week, "week", 0, "Week number to scan, e.g. 2497")
+	flag.IntVar(&scanner.week, "week", 0, "Week number to scan, e.g. 2497 (0 means current week)")
 	flag.IntVar(&scanner.segments, "segments", 1, "Number of segments to run in parallel")
 	flag.IntVar(&scanner.deleteBatchSize, "delete-batch-size", 10, "Number of delete requests to batch up")
 	flag.IntVar(&pagesPerDot, "pages-per-dot", 10, "Print a dot per N pages in DynamoDB (0 to disable)")
