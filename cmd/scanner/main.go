@@ -187,6 +187,9 @@ func orgFromHash(hashVal *string) int {
 		return -1
 	}
 	pos := strings.Index(hashStr, "/")
+	if pos < 0 { // try index table format
+		pos = strings.Index(hashStr, ":")
+	}
 	if pos < 0 { // unrecognized format
 		return -1
 	}
