@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -93,7 +94,9 @@ func (sc scanner) segmentScan(segment int, handler handler) error {
 	}
 
 	for _, arg := range flag.Args() {
-		handler.orgs[arg] = struct{}{}
+		org, err := strconv.Atoi(arg)
+		checkFatal(err)
+		handler.orgs[org] = struct{}{}
 	}
 
 	err := sc.dynamoDB.ScanPages(input, handler.handlePage)
@@ -120,12 +123,12 @@ const (
 )
 
 type summary struct {
-	counts map[string]int
+	counts map[int]int
 }
 
 func newSummary() summary {
 	return summary{
-		counts: map[string]int{},
+		counts: map[int]int{},
 	}
 }
 
@@ -137,27 +140,27 @@ func (s *summary) accumulate(b summary) {
 
 func (s summary) print() {
 	for user, count := range s.counts {
-		fmt.Printf("%s, %d\n", user, count)
+		fmt.Printf("%d, %d\n", user, count)
 	}
 }
 
 type handler struct {
 	pages    int
-	orgs     map[string]struct{}
+	orgs     map[int]struct{}
 	requests []*dynamodb.WriteRequest
 	summary
 }
 
 func newHandler() handler {
 	return handler{
-		orgs:    map[string]struct{}{},
+		orgs:    map[int]struct{}{},
 		summary: newSummary(),
 	}
 }
 
 func (h *handler) reset() {
 	h.requests = nil
-	h.counts = map[string]int{}
+	h.counts = map[int]int{}
 }
 
 func (h *handler) handlePage(page *dynamodb.ScanOutput, lastPage bool) bool {
@@ -166,28 +169,40 @@ func (h *handler) handlePage(page *dynamodb.ScanOutput, lastPage bool) bool {
 		fmt.Printf(".")
 	}
 	for _, m := range page.Items {
-		v := m[hashKey]
-		if v.S != nil {
-			key := *v.S
-			pos := strings.Index(key, "/")
-			if pos < 0 { // unrecognized format
-				continue
-			}
-			org := key[:pos]
-			h.counts[org]++
-			if _, found := h.orgs[org]; found {
-				fmt.Printf("%s\n", key)
-				h.requests = append(h.requests, &dynamodb.WriteRequest{
-					DeleteRequest: &dynamodb.DeleteRequest{
-						Key: map[string]*dynamodb.AttributeValue{
-							hashKey: {S: aws.String(key)},
-						},
+		hashVal := m[hashKey].S
+		org := orgFromHash(hashVal)
+		if org <= 0 { // unrecognized format
+			continue
+		}
+		h.counts[org]++
+		if _, found := h.orgs[org]; found {
+			fmt.Printf("%s\n", *hashVal)
+			h.requests = append(h.requests, &dynamodb.WriteRequest{
+				DeleteRequest: &dynamodb.DeleteRequest{
+					Key: map[string]*dynamodb.AttributeValue{
+						hashKey: {S: hashVal},
 					},
-				})
-			}
+				},
+			})
 		}
 	}
 	return true
+}
+
+func orgFromHash(hashVal *string) int {
+	hashStr := aws.StringValue(hashVal)
+	if hashStr == "" {
+		return -1
+	}
+	pos := strings.Index(hashStr, "/")
+	if pos < 0 { // unrecognized format
+		return -1
+	}
+	org, err := strconv.Atoi(hashStr[:pos])
+	if err != nil {
+		return -1
+	}
+	return org
 }
 
 func checkFatal(err error) {
