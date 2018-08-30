@@ -3,6 +3,8 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"strconv"
 	"strings"
@@ -26,6 +28,7 @@ type scanner struct {
 	segments        int
 	deleteBatchSize int
 	tableName       string
+	address         string
 
 	dynamoDB *dynamodb.DynamoDB
 }
@@ -46,6 +49,7 @@ func main() {
 	flag.IntVar(&scanner.week, "week", 0, "Week number to scan, e.g. 2497 (0 means current week)")
 	flag.IntVar(&scanner.segments, "segments", 1, "Number of segments to run in parallel")
 	flag.IntVar(&scanner.deleteBatchSize, "delete-batch-size", 10, "Number of delete requests to batch up")
+	flag.StringVar(&scanner.address, "address", "localhost:6060", "Address to listen on, for profiling, etc.")
 	flag.IntVar(&pagesPerDot, "pages-per-dot", 10, "Print a dot per N pages in DynamoDB (0 to disable)")
 
 	flag.Parse()
@@ -53,6 +57,11 @@ func main() {
 	var l logging.Level
 	l.Set("debug")
 	util.Logger, _ = util.NewPrometheusLogger(l)
+
+	// HTTP listener for profiling
+	go func() {
+		checkFatal(http.ListenAndServe(scanner.address, nil))
+	}()
 
 	if scanner.week == 0 {
 		scanner.week = int(time.Now().Unix() / int64(7*24*time.Hour/time.Second))
