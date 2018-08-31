@@ -42,7 +42,8 @@ func main() {
 		schemaConfig  chunk.SchemaConfig
 		storageConfig storage.Config
 
-		scanner scanner
+		scanner  scanner
+		loglevel string
 	)
 
 	util.RegisterFlags(&storageConfig, &schemaConfig)
@@ -50,12 +51,13 @@ func main() {
 	flag.IntVar(&scanner.segments, "segments", 1, "Number of segments to run in parallel")
 	flag.IntVar(&scanner.deleteBatchSize, "delete-batch-size", 10, "Number of delete requests to batch up")
 	flag.StringVar(&scanner.address, "address", "localhost:6060", "Address to listen on, for profiling, etc.")
+	flag.StringVar(&loglevel, "log-level", "info", "Debug level: debug, info, warning, error")
 	flag.IntVar(&pagesPerDot, "pages-per-dot", 10, "Print a dot per N pages in DynamoDB (0 to disable)")
 
 	flag.Parse()
 
 	var l logging.Level
-	l.Set("debug")
+	l.Set(loglevel)
 	util.Logger, _ = util.NewPrometheusLogger(l)
 
 	// HTTP listener for profiling
