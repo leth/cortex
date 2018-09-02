@@ -232,11 +232,22 @@ func (sc *scanner) deleteLoop(in chan map[string]*dynamodb.AttributeValue, group
 			},
 		}
 		level.Debug(util.Logger).Log("msg", "about to delete", "num_requests", len(requests))
-		_, err := sc.dynamoDB.BatchWriteItem(delete)
+		ret, err := sc.dynamoDB.BatchWriteItem(delete)
+		requests = requests[:0]
 		if err != nil {
 			level.Error(util.Logger).Log("msg", "unable to delete", "err", err)
+		} else {
+			// Add unprocessed items back into the requests list
+			for tableName, items := range ret.UnprocessedItems {
+				if tableName != sc.tableName {
+					level.Error(util.Logger).Log("msg", "mis-matched table names", "expected", sc.tableName, "got", tableName)
+					continue
+				}
+				for _, item := range items {
+					requests = append(requests, item)
+				}
+			}
 		}
-		requests = requests[:0]
 	}
 
 	for {
