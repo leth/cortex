@@ -293,10 +293,24 @@ func (sc *scanner) batcher(pending *sync.WaitGroup) {
 	finished := false
 	var requests []*dynamodb.WriteRequest
 	for {
+		// We will allow in new data if the queue isn't too long
+		var in chan map[string]*dynamodb.AttributeValue
+		if len(requests) < 1000 {
+			in = sc.delete
+		}
+		// We will send out a batch if the queue is big enough, or if we're finishing
+		var out chan []*dynamodb.WriteRequest
+		outlen := len(requests)
+		if len(requests) >= sc.deleteBatchSize {
+			out = sc.batched
+			outlen = sc.deleteBatchSize
+		} else if finished && len(requests) > 0 {
+			out = sc.batched
+		}
 		var keyMap map[string]*dynamodb.AttributeValue
 		var ok bool
 		select {
-		case keyMap = <-sc.delete:
+		case keyMap = <-in:
 			if keyMap == nil { // Nil used as interlock to know we received all previous values
 				finished = true
 			} else {
@@ -306,6 +320,8 @@ func (sc *scanner) batcher(pending *sync.WaitGroup) {
 			if !ok {
 				return
 			}
+		case out <- requests[:outlen]:
+			requests = requests[outlen:]
 		}
 		if keyMap != nil {
 			requests = append(requests, &dynamodb.WriteRequest{
@@ -313,10 +329,6 @@ func (sc *scanner) batcher(pending *sync.WaitGroup) {
 					Key: keyMap,
 				},
 			})
-		}
-		if len(requests) == sc.deleteBatchSize || finished {
-			sc.batched <- requests
-			requests = nil
 		}
 	}
 }
