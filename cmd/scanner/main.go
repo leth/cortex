@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/go-kit/kit/log/level"
@@ -32,6 +33,12 @@ type scanner struct {
 	address         string
 
 	dynamoDB *dynamodb.DynamoDB
+
+	// Readers send items on this chan to be deleted
+	delete chan map[string]*dynamodb.AttributeValue
+	retry  chan map[string]*dynamodb.AttributeValue
+	// Deleters read batches of items from this chan
+	batched chan []*dynamodb.WriteRequest
 }
 
 var (
@@ -76,43 +83,61 @@ func main() {
 	session := session.New(config)
 	scanner.dynamoDB = dynamodb.New(session)
 
-	var group sync.WaitGroup
-	group.Add(scanner.segments)
-	totals := newSummary()
-	var totalsMutex sync.Mutex
-
 	scanner.tableName = fmt.Sprintf("%s%d", schemaConfig.ChunkTables.Prefix, scanner.week)
 	fmt.Printf("table %s\n", scanner.tableName)
 
-	deleteChan := make(chan map[string]*dynamodb.AttributeValue, 100)
+	// Unbuffered chan so we can tell when batcher has received all items
+	scanner.delete = make(chan map[string]*dynamodb.AttributeValue)
+	scanner.retry = make(chan map[string]*dynamodb.AttributeValue, 100)
+	scanner.batched = make(chan []*dynamodb.WriteRequest)
+
 	var deleteGroup sync.WaitGroup
 	deleteGroup.Add(scanner.deleters)
+	var pending sync.WaitGroup
+	go func() {
+		scanner.batcher(&pending)
+		deleteGroup.Done()
+	}()
 	for i := 0; i < scanner.deleters; i++ {
-		go scanner.deleteLoop(deleteChan, &deleteGroup)
+		go func() {
+			scanner.deleteLoop(&pending)
+			deleteGroup.Done()
+		}()
 	}
+
+	var readerGroup sync.WaitGroup
+	readerGroup.Add(scanner.segments)
+	totals := newSummary()
+	var totalsMutex sync.Mutex
 
 	for segment := 0; segment < scanner.segments; segment++ {
 		go func(segment int) {
 			handler := newHandler()
-			handler.requests = deleteChan
+			handler.requests = scanner.delete
 			err := scanner.segmentScan(segment, handler)
 			checkFatal(err)
 			totalsMutex.Lock()
 			totals.accumulate(handler.summary)
 			totalsMutex.Unlock()
-			group.Done()
+			readerGroup.Done()
 		}(segment)
 	}
-	group.Wait()
-	// Close chan to signal deleter(s) to terminate
-	close(deleteChan)
+	// Wait until all reader segments have finished
+	readerGroup.Wait()
+	// Ensure that batcher has received all items so it won't call Add() any more
+	scanner.delete <- nil
+	// Wait for pending items to be sent to DynamoDB
+	pending.Wait()
+	// Close chans to signal deleter(s) and batcher to terminate
+	close(scanner.batched)
+	close(scanner.retry)
 	deleteGroup.Wait()
 
 	fmt.Printf("\n")
 	totals.print()
 }
 
-func (sc scanner) segmentScan(segment int, handler handler) error {
+func (sc *scanner) segmentScan(segment int, handler handler) error {
 	input := &dynamodb.ScanInput{
 		TableName:            aws.String(sc.tableName),
 		ProjectionExpression: aws.String(hashKey + "," + rangeKey),
@@ -222,49 +247,76 @@ func checkFatal(err error) {
 	}
 }
 
-func (sc *scanner) deleteLoop(in chan map[string]*dynamodb.AttributeValue, group *sync.WaitGroup) {
-	defer group.Done()
-	var requests []*dynamodb.WriteRequest
-	flush := func() {
-		delete := &dynamodb.BatchWriteItemInput{
-			RequestItems: map[string][]*dynamodb.WriteRequest{
-				sc.tableName: requests,
-			},
-		}
-		level.Debug(util.Logger).Log("msg", "about to delete", "num_requests", len(requests))
-		ret, err := sc.dynamoDB.BatchWriteItem(delete)
-		requests = requests[:0]
-		if err != nil {
-			level.Error(util.Logger).Log("msg", "unable to delete", "err", err)
-		} else {
-			// Add unprocessed items back into the requests list
-			for tableName, items := range ret.UnprocessedItems {
-				if tableName != sc.tableName {
-					level.Error(util.Logger).Log("msg", "mis-matched table names", "expected", sc.tableName, "got", tableName)
-					continue
-				}
-				for _, item := range items {
-					requests = append(requests, item)
-				}
-			}
-		}
-	}
+func throttled(err error) bool {
+	awsErr, ok := err.(awserr.Error)
+	return ok && (awsErr.Code() == dynamodb.ErrCodeProvisionedThroughputExceededException)
+}
 
+func (sc *scanner) deleteLoop(pending *sync.WaitGroup) {
 	for {
-		keyMap, ok := <-in
+		batch, ok := <-sc.batched
 		if !ok {
-			if len(requests) > 0 {
-				flush()
-			}
 			return
 		}
-		requests = append(requests, &dynamodb.WriteRequest{
-			DeleteRequest: &dynamodb.DeleteRequest{
-				Key: keyMap,
+		level.Debug(util.Logger).Log("msg", "about to delete", "num_requests", len(batch))
+		ret, err := sc.dynamoDB.BatchWriteItem(&dynamodb.BatchWriteItemInput{
+			RequestItems: map[string][]*dynamodb.WriteRequest{
+				sc.tableName: batch,
 			},
 		})
-		if len(requests) >= sc.deleteBatchSize {
-			flush()
+		if err != nil {
+			if throttled(err) {
+				// Send the whole request back into the batcher
+				for _, item := range batch {
+					sc.retry <- item.DeleteRequest.Key
+				}
+			} else {
+				level.Error(util.Logger).Log("msg", "unable to delete", "err", err)
+				pending.Add(-len(batch))
+			}
+			continue
+		}
+		count := 0
+		// Send unprocessed items back into the batcher
+		for _, items := range ret.UnprocessedItems {
+			count += len(items)
+			for _, item := range items {
+				sc.retry <- item.DeleteRequest.Key
+			}
+		}
+		pending.Add(-(len(batch) - count))
+	}
+}
+
+// Receive individual requests, and batch them up into groups to send to DynamoDB
+func (sc *scanner) batcher(pending *sync.WaitGroup) {
+	finished := false
+	var requests []*dynamodb.WriteRequest
+	for {
+		var keyMap map[string]*dynamodb.AttributeValue
+		var ok bool
+		select {
+		case keyMap = <-sc.delete:
+			if keyMap == nil { // Nil used as interlock to know we received all previous values
+				finished = true
+			} else {
+				pending.Add(1)
+			}
+		case keyMap, ok = <-sc.retry:
+			if !ok {
+				return
+			}
+		}
+		if keyMap != nil {
+			requests = append(requests, &dynamodb.WriteRequest{
+				DeleteRequest: &dynamodb.DeleteRequest{
+					Key: keyMap,
+				},
+			})
+		}
+		if len(requests) == sc.deleteBatchSize || finished {
+			sc.batched <- requests
+			requests = nil
 		}
 	}
 }
