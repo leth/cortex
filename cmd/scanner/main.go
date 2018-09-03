@@ -58,7 +58,7 @@ func main() {
 	flag.IntVar(&scanner.week, "week", 0, "Week number to scan, e.g. 2497 (0 means current week)")
 	flag.IntVar(&scanner.segments, "segments", 1, "Number of segments to read in parallel")
 	flag.IntVar(&scanner.deleters, "deleters", 1, "Number of deleters to run in parallel")
-	flag.IntVar(&scanner.deleteBatchSize, "delete-batch-size", 10, "Number of delete requests to batch up")
+	flag.IntVar(&scanner.deleteBatchSize, "delete-batch-size", 25, "Number of delete requests to batch up")
 	flag.StringVar(&scanner.address, "address", "localhost:6060", "Address to listen on, for profiling, etc.")
 	flag.StringVar(&loglevel, "log-level", "info", "Debug level: debug, info, warning, error")
 	flag.IntVar(&pagesPerDot, "pages-per-dot", 10, "Print a dot per N pages in DynamoDB (0 to disable)")
