@@ -92,7 +92,7 @@ func main() {
 	scanner.batched = make(chan []*dynamodb.WriteRequest)
 
 	var deleteGroup sync.WaitGroup
-	deleteGroup.Add(scanner.deleters)
+	deleteGroup.Add(1 + scanner.deleters)
 	var pending sync.WaitGroup
 	go func() {
 		scanner.batcher(&pending)
