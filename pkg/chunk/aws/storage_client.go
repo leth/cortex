@@ -815,6 +815,14 @@ func (b *dynamoDBReadResponseIterator) Next() bool {
 	return b.i < len(b.items)
 }
 
+func (b dynamoDBReadResponse) HashValue(i int) string {
+	return aws.StringValue(b[i][hashKey].S)
+}
+
+func (b dynamoDBReadResponse) RangeValue(i int) []byte {
+	return b[i][rangeKey].B
+}
+
 func (b *dynamoDBReadResponseIterator) RangeValue() []byte {
 	return b.items[b.i][rangeKey].B
 }
