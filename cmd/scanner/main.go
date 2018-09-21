@@ -74,16 +74,14 @@ func main() {
 
 	storageClient, err := storage.NewStorageClient(storageConfig, schemaConfig)
 	checkFatal(err)
+	writer := chunk.NewWriter(storageClient)
 
 	tableName = fmt.Sprintf("%s%d", schemaConfig.ChunkTables.Prefix, week)
 	fmt.Printf("table %s\n", tableName)
 
-	handlers := make([]handler, segments)
 	callbacks := make([]func(result chunk.ReadBatch), segments)
 	for segment := 0; segment < segments; segment++ {
-		handler := newHandler(orgs)
-		handler.requests = scanner.delete
-		handlers[segment] = handler
+		handler := newHandler(storageClient, tableName, orgs, writer.Write)
 		callbacks[segment] = handler.handlePage
 	}
 
@@ -116,16 +114,21 @@ func (s summary) print() {
 }
 
 type handler struct {
-	pages    int
-	orgs     map[int]struct{}
-	requests chan chunk.WriteBatch
+	storageClient chunk.StorageClient
+	tableName     string
+	pages         int
+	orgs          map[int]struct{}
+	requests      chan chunk.WriteBatch
 	summary
 }
 
-func newHandler(orgs map[int]struct{}) handler {
+func newHandler(storageClient chunk.StorageClient, tableName string, orgs map[int]struct{}, requests chan chunk.WriteBatch) handler {
 	return handler{
-		orgs:    orgs,
-		summary: newSummary(),
+		storageClient: storageClient,
+		tableName:     tableName,
+		orgs:          orgs,
+		summary:       newSummary(),
+		requests:      requests,
 	}
 }
 
@@ -142,12 +145,9 @@ func (h *handler) handlePage(page chunk.ReadBatch) {
 		}
 		h.counts[org]++
 		if _, found := h.orgs[org]; found {
-			h.requests <- storageItem{
-				tableName:  x,
-				hashValue:  hashValue,
-				rangeValue: page.RangeValue(i),
-				value:      page.Value(i),
-			}
+			request := h.storageClient.NewWriteBatch()
+			request.AddDelete(h.tableName, hashValue, page.RangeValue(i))
+			h.requests <- request
 		}
 	}
 }
