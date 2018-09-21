@@ -17,17 +17,22 @@ func throttled(err error) bool {
 }
 
 func (a storageClient) ScanTable(ctx context.Context, tableName string, callbacks []func(result chunk.ReadBatch)) error {
+	var outerErr error
 	var readerGroup sync.WaitGroup
 	readerGroup.Add(len(callbacks))
 	for segment, callback := range callbacks {
-		go func(segment int) {
+		go func(segment int, callback func(result chunk.ReadBatch)) {
 			err := a.segmentScan(segment, len(callbacks), tableName, callback)
+			if err != nil {
+				outerErr = err
+				// TODO: abort all segments
+			}
 			readerGroup.Done()
-		}(segment)
+		}(segment, callback)
 	}
 	// Wait until all reader segments have finished
 	readerGroup.Wait()
-	return nil
+	return outerErr
 }
 
 func (a storageClient) segmentScan(segment, totalSegments int, tableName string, callback func(result chunk.ReadBatch)) error {
@@ -40,7 +45,7 @@ func (a storageClient) segmentScan(segment, totalSegments int, tableName string,
 	}
 
 	err := a.DynamoDB.ScanPages(input, func(page *dynamodb.ScanOutput, lastPage bool) bool {
-		callback(dynamoDBReadResponse(page.Items))
+		callback(&dynamoDBReadResponse{items: page.Items})
 		return true
 	})
 	if err != nil {
@@ -63,5 +68,5 @@ func (a storageClient) BatchWriteNoRetry(ctx context.Context, batch chunk.WriteB
 		}
 	}
 	// Send unprocessed items back
-	return ret.UnprocessedItems, nil
+	return dynamoDBWriteBatch(ret.UnprocessedItems), nil
 }

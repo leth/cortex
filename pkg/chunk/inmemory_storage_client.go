@@ -174,7 +174,7 @@ func (m *MockStorage) BatchWriteNoRetry(ctx context.Context, batch WriteBatch) (
 	return nil, nil
 }
 
-func (m *MockStorage) ScanTable(ctx context.Context, tableName, callbacks []func(result ReadBatch)) error {
+func (m *MockStorage) ScanTable(ctx context.Context, tableName string, callbacks []func(result ReadBatch)) error {
 	return nil
 }
 
@@ -323,6 +323,10 @@ func (b *mockWriteBatch) Add(tableName, hashValue string, rangeValue []byte, val
 	}{tableName, hashValue, rangeValue, value})
 }
 
+func (b *mockWriteBatch) AddDelete(tableName, hashValue string, rangeValue []byte) {
+	panic("TODO")
+}
+
 func (b mockWriteBatch) Len() int {
 	return len(b)
 }
@@ -341,6 +345,17 @@ func (b *mockReadBatch) Iterator() ReadBatchIterator {
 type mockReadBatchIter struct {
 	index int
 	*mockReadBatch
+}
+
+func (b *mockWriteBatch) AddBatch(a WriteBatch) {
+	*b = append(*b, *a.(*mockWriteBatch)...)
+}
+
+func (b *mockWriteBatch) Take(undersizedOK bool) WriteBatch {
+	// Not a very full implementation - just return everything
+	ret := *b
+	*b = nil
+	return &ret
 }
 
 func (b *mockReadBatchIter) Next() bool {

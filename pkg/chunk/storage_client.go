@@ -13,7 +13,7 @@ type StorageClient interface {
 	QueryPages(ctx context.Context, queries []IndexQuery, callback func(IndexQuery, ReadBatch) (shouldContinue bool)) error
 
 	// Iterate through every row in a table, for batch jobs
-	ScanTable(ctx context.Context, tableName, callbacks []func(result ReadBatch)) error
+	ScanTable(ctx context.Context, tableName string, callbacks []func(result ReadBatch)) error
 
 	// For storing and retrieving chunks.
 	PutChunks(ctx context.Context, chunks []Chunk) error
@@ -23,7 +23,10 @@ type StorageClient interface {
 // WriteBatch represents a batch of writes.
 type WriteBatch interface {
 	Add(tableName, hashValue string, rangeValue []byte, value []byte)
+	AddDelete(tableName, hashValue string, rangeValue []byte)
+	AddBatch(WriteBatch)
 	Len() int
+	Take(undersizedOK bool) WriteBatch
 }
 
 // ReadBatch represents the results of a QueryPages.

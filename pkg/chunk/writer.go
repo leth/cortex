@@ -31,9 +31,9 @@ type Writer struct {
 	pending sync.WaitGroup
 
 	// Clients send items on this chan to be written
-	Write chan *storageItem
+	Write chan WriteBatch
 	// internally we send items on this chan to be retried
-	retry chan *storageItem
+	retry chan WriteBatch
 	// Writers read batches of items from this chan
 	batched chan WriteBatch
 }
@@ -48,8 +48,8 @@ func NewWriter(cfg ScannerConfig, storage StorageClient) *Writer {
 	writer := &Writer{
 		storage: storage,
 		// Unbuffered chan so we can tell when batcher has received all items
-		Write:   make(chan *storageItem),
-		retry:   make(chan *storageItem, 100),
+		Write:   make(chan WriteBatch),
+		retry:   make(chan WriteBatch, 100),
 		batched: make(chan WriteBatch),
 	}
 	return writer
@@ -94,54 +94,49 @@ func (sc *Writer) writeLoop() {
 			continue
 		}
 		// Send unprocessed items back into the batcher
-		for _, item := range retry {
-			sc.retry <- &item
-		}
-		sc.pending.Add(-(batch.Len() - len(retry)))
+		sc.retry <- retry
+		sc.pending.Add(-(batch.Len() - retry.Len()))
 	}
 }
 
 // Receive individual requests, and batch them up into groups to send to the store
 func (sc *Writer) batcher() {
 	finished := false
-	var requests []*storageItem
+	var requests WriteBatch
 	for {
 		// We will allow in new data if the queue isn't too long
-		var in chan *storageItem
-		if len(requests) < 1000 {
+		var in chan WriteBatch
+		if requests.Len() < 1000 {
 			in = sc.Write
 		}
 		// We will send out a batch if the queue is big enough, or if we're finishing
 		var out chan WriteBatch
-		outlen := len(requests)
-		if len(requests) >= sc.writeBatchSize {
-			out = sc.batched
-			outlen = sc.writeBatchSize
-		} else if finished && len(requests) > 0 {
+		outBatch := requests.Take(finished)
+		if outBatch != nil {
 			out = sc.batched
 		}
-		outBatch := sc.storage.NewWriteBatch()
-		for _, item := range requests[:outlen] {
-			outBatch.Add(item.tableName, item.hashValue, item.rangeValue, item.value)
-		}
-		var item *storageItem
+		var inBatch WriteBatch
 		var ok bool
 		select {
-		case item = <-in:
-			if item == nil { // Nil used as interlock to know we received all previous values
+		case inBatch = <-in:
+			if inBatch == nil { // Nil used as interlock to know we received all previous values
 				finished = true
 			} else {
-				sc.pending.Add(1)
+				requests.AddBatch(inBatch)
+				sc.pending.Add(inBatch.Len())
 			}
-		case item, ok = <-sc.retry:
+		case inBatch, ok = <-sc.retry:
 			if !ok {
 				return
 			}
 		case out <- outBatch:
-			requests = requests[outlen:]
+			outBatch = nil
 		}
-		if item != nil {
-			requests = append(requests, item)
+		if inBatch != nil {
+			requests.AddBatch(inBatch)
+		}
+		if outBatch != nil {
+			requests.AddBatch(outBatch)
 		}
 	}
 }
