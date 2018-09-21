@@ -5,16 +5,10 @@ import (
 	"sync"
 
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 
 	"github.com/weaveworks/cortex/pkg/chunk"
 )
-
-func throttled(err error) bool {
-	awsErr, ok := err.(awserr.Error)
-	return ok && (awsErr.Code() == dynamodb.ErrCodeProvisionedThroughputExceededException)
-}
 
 func (a storageClient) ScanTable(ctx context.Context, tableName string, callbacks []func(result chunk.ReadBatch)) error {
 	var outerErr error
@@ -52,21 +46,4 @@ func (a storageClient) segmentScan(segment, totalSegments int, tableName string,
 		return err
 	}
 	return nil
-}
-
-func (a storageClient) BatchWriteNoRetry(ctx context.Context, batch chunk.WriteBatch) (retry chunk.WriteBatch, err error) {
-	dynamoBatch := batch.(dynamoDBWriteBatch)
-	ret, err := a.DynamoDB.BatchWriteItem(&dynamodb.BatchWriteItemInput{
-		RequestItems: dynamoBatch,
-	})
-	if err != nil {
-		if throttled(err) {
-			// Send the whole request back
-			return dynamoBatch, nil
-		} else {
-			return nil, err
-		}
-	}
-	// Send unprocessed items back
-	return dynamoDBWriteBatch(ret.UnprocessedItems), nil
 }
