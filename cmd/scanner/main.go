@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -9,15 +10,9 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/awserr"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/go-kit/kit/log/level"
-	awscommon "github.com/weaveworks/common/aws"
 	"github.com/weaveworks/common/logging"
 
 	"github.com/weaveworks/cortex/pkg/chunk"
@@ -36,13 +31,17 @@ func main() {
 
 		orgsFile string
 
-		scannerConfig chunk.ScannerConfig
-		loglevel      string
-		address       string
+		week      int
+		segments  int
+		tableName string
+		loglevel  string
+		address   string
 	)
 
-	util.RegisterFlags(&storageConfig, &schemaConfig, &scannerConfig)
+	util.RegisterFlags(&storageConfig, &schemaConfig)
 	flag.StringVar(&address, "address", "localhost:6060", "Address to listen on, for profiling, etc.")
+	flag.IntVar(&week, "week", 0, "Week number to scan, e.g. 2497 (0 means current week)")
+	flag.IntVar(&segments, "segments", 1, "Number of segments to read in parallel")
 	flag.StringVar(&orgsFile, "delete-orgs-file", "", "File containing IDs of orgs to delete")
 	flag.StringVar(&loglevel, "log-level", "info", "Debug level: debug, info, warning, error")
 	flag.IntVar(&pagesPerDot, "pages-per-dot", 10, "Print a dot per N pages in DynamoDB (0 to disable)")
@@ -69,23 +68,26 @@ func main() {
 		}
 	}
 
-	if scannerConfig.week == 0 {
-		scannerConfig.week = int(time.Now().Unix() / int64(7*24*time.Hour/time.Second))
+	if week == 0 {
+		week = int(time.Now().Unix() / int64(7*24*time.Hour/time.Second))
 	}
 
-	scanner, err := chunk.NewScanner(scannerConfig, storageClient, schemaConfig)
+	storageClient, err := storage.NewStorageClient(storageConfig, schemaConfig)
 	checkFatal(err)
 
-	handlers := make([]handler, scannerConfig.Segments)
-	callbacks := make([]func(result chunk.ReadBatch), scannerConfig.Segments)
-	for segment := 0; segment < scannerConfig.Segments; segment++ {
+	tableName = fmt.Sprintf("%s%d", schemaConfig.ChunkTables.Prefix, week)
+	fmt.Printf("table %s\n", tableName)
+
+	handlers := make([]handler, segments)
+	callbacks := make([]func(result chunk.ReadBatch), segments)
+	for segment := 0; segment < segments; segment++ {
 		handler := newHandler(orgs)
 		handler.requests = scanner.delete
-		handlers[i] = handler
-		callbacks[i] = handler.handlePage
+		handlers[segment] = handler
+		callbacks[segment] = handler.handlePage
 	}
 
-	err = scanner.Scan(context.Background(), orgs, callbacks)
+	err = storageClient.ScanTable(context.Background(), tableName, callbacks)
 	checkFatal(err)
 }
 
@@ -116,7 +118,7 @@ func (s summary) print() {
 type handler struct {
 	pages    int
 	orgs     map[int]struct{}
-	requests chan storageItem
+	requests chan chunk.WriteBatch
 	summary
 }
 
@@ -127,14 +129,14 @@ func newHandler(orgs map[int]struct{}) handler {
 	}
 }
 
-func (h *handler) handlePage(page ReadBatch) bool {
+func (h *handler) handlePage(page chunk.ReadBatch) {
 	h.pages++
 	if pagesPerDot > 0 && h.pages%pagesPerDot == 0 {
 		fmt.Printf(".")
 	}
 	for i := 0; i < page.Len(); i++ {
 		hashValue := page.HashValue(i)
-		org := orgFromHash(hashValue)
+		org := chunk.OrgFromHash(hashValue)
 		if org <= 0 {
 			continue
 		}
@@ -148,7 +150,6 @@ func (h *handler) handlePage(page ReadBatch) bool {
 			}
 		}
 	}
-	return true
 }
 
 func checkFatal(err error) {

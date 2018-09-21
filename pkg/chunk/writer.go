@@ -44,7 +44,7 @@ func (cfg *WriterConfig) RegisterFlags(f *flag.FlagSet) {
 	flag.IntVar(&cfg.writeBatchSize, "write-batch-size", 25, "Number of write requests to batch up")
 }
 
-func NewWriter(cfg ScannerConfig, storage StorageClient) *Writer {
+func NewWriter(storage StorageClient) *Writer {
 	writer := &Writer{
 		storage: storage,
 		// Unbuffered chan so we can tell when batcher has received all items

@@ -357,7 +357,7 @@ func (c *Chunk) Samples(from, through model.Time) ([]model.SamplePair, error) {
 	return prom_chunk.RangeValues(it, interval)
 }
 
-func orgFromHash(hashStr string) int {
+func OrgFromHash(hashStr string) int {
 	if hashStr == "" {
 		return -1
 	}
