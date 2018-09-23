@@ -56,7 +56,7 @@ func (writer *Writer) Run() {
 	}()
 	for i := 0; i < writer.writers; i++ {
 		go func() {
-			writer.writeLoop()
+			writer.writeLoop(context.TODO())
 			writer.group.Done()
 		}()
 	}
@@ -75,14 +75,14 @@ func (writer *Writer) Stop() {
 
 // writeLoop receives on the 'batched' chan, sends to store, and
 // passes anything that was throttled to the 'retry' chan.
-func (sc *Writer) writeLoop() {
+func (sc *Writer) writeLoop(ctx context.Context) {
 	for {
 		batch, ok := <-sc.batched
 		if !ok {
 			return
 		}
 		level.Debug(util.Logger).Log("msg", "about to write", "num_requests", batch.Len())
-		retry, err := sc.storage.BatchWriteNoRetry(context.TODO(), batch)
+		retry, err := sc.storage.BatchWriteNoRetry(ctx, batch)
 		if err != nil {
 			level.Error(util.Logger).Log("msg", "unable to write; dropping data", "err", err)
 			sc.pending.Add(-batch.Len())
