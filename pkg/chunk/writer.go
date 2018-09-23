@@ -105,6 +105,7 @@ func (sc *Writer) writeLoop(ctx context.Context) {
 func (sc *Writer) batcher() {
 	finished := false
 	var queue, outBatch WriteBatch
+	queue = sc.storage.NewWriteBatch()
 	for {
 		var in, out chan WriteBatch
 		// We will allow in new data if the queue isn't too long
