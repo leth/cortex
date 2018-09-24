@@ -5,6 +5,8 @@ import (
 
 	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/require"
+
+	"github.com/weaveworks/cortex/pkg/util"
 )
 
 func TestWriter(t *testing.T) {
@@ -15,7 +17,9 @@ func TestWriter(t *testing.T) {
 	defer st.Stop()
 	store := st.(*store)
 
-	writer := NewWriter(store.storage)
+	var cfg WriterConfig
+	util.DefaultValues(&cfg)
+	writer := NewWriter(cfg, store.storage)
 	writer.Run()
 
 	writeReqs, err := store.calculateIndexEntries(userID, fooChunk1.From, fooChunk1.Through, fooChunk1)

@@ -41,9 +41,10 @@ func (cfg *WriterConfig) RegisterFlags(f *flag.FlagSet) {
 	flag.Float64Var(&cfg.rateLimit, "writer-rate-limit", 1000, "Max rate to send rows to storage back-end, per writer")
 }
 
-func NewWriter(storage StorageClient) *Writer {
+func NewWriter(cfg WriterConfig, storage StorageClient) *Writer {
 	writer := &Writer{
-		storage: storage,
+		WriterConfig: cfg,
+		storage:      storage,
 		// Unbuffered chan so we can tell when batcher has received all items
 		Write:   make(chan WriteBatch),
 		retry:   make(chan WriteBatch, 100), // we should always accept retry data, to avoid deadlock
