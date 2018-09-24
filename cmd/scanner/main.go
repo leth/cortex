@@ -26,6 +26,7 @@ var (
 
 func main() {
 	var (
+		writerConfig  chunk.WriterConfig
 		schemaConfig  chunk.SchemaConfig
 		storageConfig storage.Config
 
@@ -38,7 +39,7 @@ func main() {
 		address   string
 	)
 
-	util.RegisterFlags(&storageConfig, &schemaConfig)
+	util.RegisterFlags(&writerConfig, &storageConfig, &schemaConfig)
 	flag.StringVar(&address, "address", "localhost:6060", "Address to listen on, for profiling, etc.")
 	flag.IntVar(&week, "week", 0, "Week number to scan, e.g. 2497 (0 means current week)")
 	flag.IntVar(&segments, "segments", 1, "Number of segments to read in parallel")
@@ -74,7 +75,7 @@ func main() {
 
 	storageClient, err := storage.NewStorageClient(storageConfig, schemaConfig)
 	checkFatal(err)
-	writer := chunk.NewWriter(storageClient)
+	writer := chunk.NewWriter(writerConfig, storageClient)
 
 	tableName = fmt.Sprintf("%s%d", schemaConfig.ChunkTables.Prefix, week)
 	fmt.Printf("table %s\n", tableName)
