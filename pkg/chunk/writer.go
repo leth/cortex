@@ -53,6 +53,16 @@ func NewWriter(cfg WriterConfig, storage StorageClient) *Writer {
 	return writer
 }
 
+func (writer Writer) IndexChunk(st Store, chunk Chunk) error {
+	store := st.(*store) // hack!
+	writeReqs, err := store.calculateIndexEntries(chunk.UserID, chunk.From, chunk.Through, chunk)
+	if err != nil {
+		return err
+	}
+	writer.Write <- writeReqs
+	return nil
+}
+
 func (writer *Writer) Run() {
 	writer.group.Add(1 + writer.writers)
 	go func() {

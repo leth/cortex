@@ -26,9 +26,10 @@ var (
 
 func main() {
 	var (
-		writerConfig  chunk.WriterConfig
-		schemaConfig  chunk.SchemaConfig
-		storageConfig storage.Config
+		writerConfig     chunk.WriterConfig
+		schemaConfig     chunk.SchemaConfig
+		storageConfig    storage.Config
+		chunkStoreConfig chunk.StoreConfig
 
 		orgsFile string
 
@@ -37,15 +38,18 @@ func main() {
 		tableName string
 		loglevel  string
 		address   string
+
+		reindexTablePrefix string
 	)
 
-	util.RegisterFlags(&writerConfig, &storageConfig, &schemaConfig)
+	util.RegisterFlags(&writerConfig, &storageConfig, &schemaConfig, &chunkStoreConfig)
 	flag.StringVar(&address, "address", "localhost:6060", "Address to listen on, for profiling, etc.")
 	flag.IntVar(&week, "week", 0, "Week number to scan, e.g. 2497 (0 means current week)")
 	flag.IntVar(&segments, "segments", 1, "Number of segments to read in parallel")
 	flag.StringVar(&orgsFile, "delete-orgs-file", "", "File containing IDs of orgs to delete")
 	flag.StringVar(&loglevel, "log-level", "info", "Debug level: debug, info, warning, error")
 	flag.IntVar(&pagesPerDot, "pages-per-dot", 10, "Print a dot per N pages in DynamoDB (0 to disable)")
+	flag.StringVar(&reindexTablePrefix, "dynamodb.reindex-prefix", "", "Prefix of new index table (blank to disable)")
 
 	flag.Parse()
 
@@ -75,6 +79,9 @@ func main() {
 
 	storageClient, err := storage.NewStorageClient(storageConfig, schemaConfig)
 	checkFatal(err)
+	chunkStore, err := chunk.NewStore(chunkStoreConfig, schemaConfig, storageClient)
+	checkFatal(err)
+	defer chunkStore.Stop()
 	writer := chunk.NewWriter(writerConfig, storageClient)
 
 	tableName = fmt.Sprintf("%s%d", schemaConfig.ChunkTables.Prefix, week)
@@ -86,7 +93,7 @@ func main() {
 		callbacks[segment] = handler.handlePage
 	}
 
-	err = storageClient.ScanTable(context.Background(), tableName, false, callbacks)
+	err = storageClient.ScanTable(context.Background(), tableName, reindexTablePrefix != "", callbacks)
 	checkFatal(err)
 }
 
@@ -138,6 +145,7 @@ func (h *handler) handlePage(page chunk.ReadBatch) {
 	if pagesPerDot > 0 && h.pages%pagesPerDot == 0 {
 		fmt.Printf(".")
 	}
+	//decodeContext := chunk.NewDecodeContext()
 	for i := 0; i < page.Len(); i++ {
 		hashValue := page.HashValue(i)
 		org := chunk.OrgFromHash(hashValue)
@@ -148,8 +156,20 @@ func (h *handler) handlePage(page chunk.ReadBatch) {
 		if _, found := h.orgs[org]; found {
 			request := h.storageClient.NewWriteBatch()
 			request.AddDelete(h.tableName, hashValue, page.RangeValue(i))
-			h.requests <- request
-		}
+			//			h.requests <- request
+		} /*else if reindexTablePrefix != "" {
+			var ch chunk.Chunk
+			err := ch.Decode(decodeContext, page.Value(i))
+			if err != nil {
+				level.Error(util.Logger).Log("msg", "chunk decode error", "err", err)
+				continue
+			}
+			err = writer.IndexChunk(store, ch)
+			if err != nil {
+				level.Error(util.Logger).Log("msg", "indexing error", "err", err)
+				continue
+			}
+		}*/
 	}
 }
 
