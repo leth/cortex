@@ -271,17 +271,7 @@ func TestChunkStore_Get(t *testing.T) {
 func TestChunkStore_getMetricNameChunks(t *testing.T) {
 	ctx := user.InjectOrgID(context.Background(), userID)
 	now := model.Now()
-	chunk1 := dummyChunkFor(now, model.Metric{
-		model.MetricNameLabel: "foo",
-		"bar":  "baz",
-		"toms": "code",
-		"flip": "flop",
-	})
-	chunk2 := dummyChunkFor(now, model.Metric{
-		model.MetricNameLabel: "foo",
-		"bar":  "beep",
-		"toms": "code",
-	})
+	chunk1, chunk2, _, _ := dummyChunks(now)
 
 	for _, tc := range []struct {
 		query  string
