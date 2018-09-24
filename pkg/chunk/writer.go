@@ -114,10 +114,10 @@ func (sc *Writer) batcher() {
 			in = sc.Write
 		}
 		// We will send out a batch if the queue is big enough, or if we're finishing
-		if outBatch == nil {
+		if outBatch == nil || outBatch.Len() == 0 {
 			outBatch = queue.Take(finished)
 		}
-		if outBatch != nil {
+		if outBatch != nil && outBatch.Len() > 0 {
 			out = sc.batched
 		}
 		select {
