@@ -76,9 +76,9 @@ func main() {
 		week = int(time.Now().Unix() / int64(7*24*time.Hour/time.Second))
 	}
 
-	storageClient, err := storage.NewStorageClient(storageConfig, schemaConfig)
+	storageOpts, err := storage.Opts(storageConfig, schemaConfig)
 	checkFatal(err)
-	chunkStore, err := chunk.NewStore(chunkStoreConfig, schemaConfig, storageClient)
+	chunkStore, err := chunk.NewStore(chunkStoreConfig, schemaConfig, storageOpts)
 	checkFatal(err)
 	defer chunkStore.Stop()
 	var reindexStore chunk.Store
@@ -86,7 +86,7 @@ func main() {
 		reindexSchemaConfig := schemaConfig
 		reindexSchemaConfig.IndexTables.Prefix = reindexTablePrefix
 		// Note we rely on aws storageClient not using its schemaConfig on the write path
-		reindexStore, err = chunk.NewStore(chunkStoreConfig, reindexSchemaConfig, storageClient)
+		reindexStore, err = chunk.NewStore(chunkStoreConfig, reindexSchemaConfig, storageOpts)
 		checkFatal(err)
 	}
 
@@ -160,20 +160,20 @@ func (h *handler) handlePage(page chunk.ReadBatch) {
 	}
 	ctx := context.Background()
 	decodeContext := chunk.NewDecodeContext()
-	for i := 0; i < page.Len(); i++ {
-		hashValue := page.HashValue(i)
+	for i := page.Iterator(); i.Next(); {
+		hashValue := i.HashValue()
 		org := chunk.OrgFromHash(hashValue)
 		if org <= 0 {
 			continue
 		}
 		h.counts[org]++
 		if _, found := h.orgs[org]; found {
-			request := h.storageClient.NewWriteBatch()
-			request.AddDelete(h.tableName, hashValue, page.RangeValue(i))
+			//request := h.storageClient.NewWriteBatch()
+			//request.AddDelete(h.tableName, hashValue, page.RangeValue(i))
 			//			h.requests <- request
 		} else if h.reindexTablePrefix != "" {
 			var ch chunk.Chunk
-			err := ch.Decode(decodeContext, page.Value(i))
+			err := ch.Decode(decodeContext, i.Value())
 			if err != nil {
 				level.Error(util.Logger).Log("msg", "chunk decode error", "err", err)
 				continue
