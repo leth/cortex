@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/prometheus/common/model"
+
 	"github.com/go-kit/kit/log/level"
 	"github.com/weaveworks/common/logging"
 
@@ -100,7 +102,8 @@ func main() {
 		callbacks[segment] = handlers[segment].handlePage
 	}
 
-	err = storageClient.ScanTable(context.Background(), tableName, reindexTablePrefix != "", callbacks)
+	tableTime := model.TimeFromUnix(int64(week) * 7 * 24 * 3600)
+	err = chunkStore.Scan(context.Background(), tableTime, reindexTablePrefix != "", callbacks)
 	checkFatal(err)
 
 	totals := newSummary()
