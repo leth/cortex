@@ -915,14 +915,6 @@ func (b dynamoDBWriteBatch) Take(undersizedOK bool) chunk.WriteBatch {
 	return ret
 }
 
-func (b dynamoDBWriteBatch) String() string {
-	var sb strings.Builder
-	for tableName, reqs := range b {
-		sb.WriteString(fmt.Sprintf("%s: %v ", tableName, reqs))
-	}
-	return sb.String()
-}
-
 // Fill 'b' with WriteRequests from 'from' until 'b' has at most max requests. Remove those requests from 'from'.
 func (b dynamoDBWriteBatch) TakeReqs(from dynamoDBWriteBatch, max int) {
 	outLen, inLen := b.Len(), from.Len()
