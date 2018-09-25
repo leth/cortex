@@ -905,7 +905,7 @@ func (b dynamoDBWriteBatch) AddBatch(a chunk.WriteBatch) {
 }
 
 func (b dynamoDBWriteBatch) Take(undersizedOK bool) chunk.WriteBatch {
-	var ret dynamoDBWriteBatch
+	var ret = dynamoDBWriteBatch{}
 	if b.Len() >= dynamoDBMaxWriteBatchSize || undersizedOK {
 		ret.TakeReqs(b, dynamoDBMaxWriteBatchSize)
 	}
