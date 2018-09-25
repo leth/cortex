@@ -90,7 +90,7 @@ func main() {
 	handlers := make([]handler, segments)
 	callbacks := make([]func(result chunk.ReadBatch), segments)
 	for segment := 0; segment < segments; segment++ {
-		handlers[segment] = newHandler(storageClient, tableName, orgs, writer.Write)
+		handlers[segment] = newHandler(storageClient, chunkStore, writer, tableName, reindexTablePrefix, orgs)
 		callbacks[segment] = handlers[segment].handlePage
 	}
 
@@ -129,21 +129,25 @@ func (s summary) print() {
 }
 
 type handler struct {
-	storageClient chunk.StorageClient
-	tableName     string
-	pages         int
-	orgs          map[int]struct{}
-	requests      chan chunk.WriteBatch
+	storageClient      chunk.StorageClient
+	store              chunk.Store
+	writer             *chunk.Writer
+	tableName          string
+	pages              int
+	orgs               map[int]struct{}
+	reindexTablePrefix string
 	summary
 }
 
-func newHandler(storageClient chunk.StorageClient, tableName string, orgs map[int]struct{}, requests chan chunk.WriteBatch) handler {
+func newHandler(storageClient chunk.StorageClient, store chunk.Store, writer *chunk.Writer, tableName string, reindexTablePrefix string, orgs map[int]struct{}) handler {
 	return handler{
-		storageClient: storageClient,
-		tableName:     tableName,
-		orgs:          orgs,
-		summary:       newSummary(),
-		requests:      requests,
+		storageClient:      storageClient,
+		store:              store,
+		writer:             writer,
+		tableName:          tableName,
+		orgs:               orgs,
+		summary:            newSummary(),
+		reindexTablePrefix: reindexTablePrefix,
 	}
 }
 
@@ -152,7 +156,8 @@ func (h *handler) handlePage(page chunk.ReadBatch) {
 	if pagesPerDot > 0 && h.pages%pagesPerDot == 0 {
 		fmt.Printf(".")
 	}
-	//decodeContext := chunk.NewDecodeContext()
+	ctx := context.Background()
+	decodeContext := chunk.NewDecodeContext()
 	for i := 0; i < page.Len(); i++ {
 		hashValue := page.HashValue(i)
 		org := chunk.OrgFromHash(hashValue)
@@ -164,19 +169,19 @@ func (h *handler) handlePage(page chunk.ReadBatch) {
 			request := h.storageClient.NewWriteBatch()
 			request.AddDelete(h.tableName, hashValue, page.RangeValue(i))
 			//			h.requests <- request
-		} /*else if reindexTablePrefix != "" {
+		} else if h.reindexTablePrefix != "" {
 			var ch chunk.Chunk
 			err := ch.Decode(decodeContext, page.Value(i))
 			if err != nil {
 				level.Error(util.Logger).Log("msg", "chunk decode error", "err", err)
 				continue
 			}
-			err = writer.IndexChunk(store, ch)
+			err = h.store.IndexChunk(ctx, h.writer, ch)
 			if err != nil {
 				level.Error(util.Logger).Log("msg", "indexing error", "err", err)
 				continue
 			}
-		}*/
+		}
 	}
 }
 
