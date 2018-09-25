@@ -99,7 +99,7 @@ func (sc *Writer) writeLoop(ctx context.Context) {
 		level.Debug(util.Logger).Log("msg", "about to write", "num_requests", batch.Len())
 		retry, err := sc.storage.BatchWriteNoRetry(ctx, batch)
 		if err != nil {
-			level.Error(util.Logger).Log("msg", "unable to write; dropping data", "err", err)
+			level.Error(util.Logger).Log("msg", "unable to write; dropping data", "err", err, "batch", batch)
 			sc.pending.Add(-batch.Len())
 			continue
 		}
