@@ -53,9 +53,8 @@ func NewWriter(cfg WriterConfig, storage StorageClient) *Writer {
 	return writer
 }
 
-func (writer Writer) IndexChunk(st Store, chunk Chunk) error {
-	store := st.(*store) // hack!
-	writeReqs, err := store.calculateIndexEntries(chunk.UserID, chunk.From, chunk.Through, chunk)
+func (c *store) IndexChunk(ctx context.Context, writer *Writer, chunk Chunk) error {
+	writeReqs, err := c.calculateIndexEntries(chunk.UserID, chunk.From, chunk.Through, chunk)
 	if err != nil {
 		return err
 	}
