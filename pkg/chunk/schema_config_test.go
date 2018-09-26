@@ -86,7 +86,8 @@ func TestHourlyBuckets(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := cfg.hourlyBuckets(tt.args.from, tt.args.through, userID); !reflect.DeepEqual(got, tt.want) {
+			b := hourlyBucketer{cfg: cfg}
+			if got := b.Buckets(tt.args.from, tt.args.through, userID); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("SchemaConfig.dailyBuckets() = %v, want %v", got, tt.want)
 			}
 		})
@@ -172,7 +173,8 @@ func TestDailyBuckets(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := cfg.dailyBuckets(tt.args.from, tt.args.through, userID); !reflect.DeepEqual(got, tt.want) {
+			b := dailyBucketer{cfg: cfg}
+			if got := b.Buckets(tt.args.from, tt.args.through, userID); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("SchemaConfig.dailyBuckets() = %v, want %v", got, tt.want)
 			}
 		})

@@ -91,7 +91,12 @@ type Bucket struct {
 	hashKey   string
 }
 
-func (cfg SchemaConfig) hourlyBuckets(from, through model.Time, userID string) []Bucket {
+type hourlyBucketer struct {
+	cfg SchemaConfig
+}
+
+// Buckets implements interface buckets
+func (hb hourlyBucketer) Buckets(from, through model.Time, userID string) []Bucket {
 	var (
 		fromHour    = from.Unix() / secondsInHour
 		throughHour = through.Unix() / secondsInHour
@@ -109,14 +114,19 @@ func (cfg SchemaConfig) hourlyBuckets(from, through model.Time, userID string) [
 		result = append(result, Bucket{
 			from:      uint32(relativeFrom),
 			through:   uint32(relativeThrough),
-			tableName: cfg.tableForBucket(i * secondsInHour),
+			tableName: hb.cfg.tableForBucket(i * secondsInHour),
 			hashKey:   fmt.Sprintf("%s:%d", userID, i),
 		})
 	}
 	return result
 }
 
-func (cfg SchemaConfig) dailyBuckets(from, through model.Time, userID string) []Bucket {
+type dailyBucketer struct {
+	cfg SchemaConfig
+}
+
+// Buckets implements interface buckets
+func (db dailyBucketer) Buckets(from, through model.Time, userID string) []Bucket {
 	var (
 		fromDay    = from.Unix() / secondsInDay
 		throughDay = through.Unix() / secondsInDay
@@ -144,7 +154,7 @@ func (cfg SchemaConfig) dailyBuckets(from, through model.Time, userID string) []
 		result = append(result, Bucket{
 			from:      uint32(relativeFrom),
 			through:   uint32(relativeThrough),
-			tableName: cfg.tableForBucket(i * secondsInDay),
+			tableName: db.cfg.tableForBucket(i * secondsInDay),
 			hashKey:   fmt.Sprintf("%s:d%d", userID, i),
 		})
 	}
