@@ -933,12 +933,12 @@ func (b dynamoDBWriteBatch) Take(undersizedOK bool) chunk.WriteBatch {
 
 func (b dynamoDBWriteBatch) deDuplicate() bool {
 	changed := false
-	for _, reqs := range b {
+	for tableName, reqs := range b {
 		// Remove duplicate entries based on hashValue:rangeValue
 		seenIndexEntries := map[string]struct{}{}
 		for i := 0; i < len(reqs); {
 			key := stringForReq(reqs[i])
-			if _, ok := seenIndexEntries[key]; ok {
+			if _, found := seenIndexEntries[key]; found {
 				reqs = append(reqs[:i], reqs[i+1:]...)
 				changed = true
 			} else {
@@ -946,6 +946,7 @@ func (b dynamoDBWriteBatch) deDuplicate() bool {
 				i++
 			}
 		}
+		b[tableName] = reqs
 	}
 	return changed
 }
