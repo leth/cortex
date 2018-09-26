@@ -72,7 +72,7 @@ type IndexEntry struct {
 // - range key: <label name>\0<label value>\0<chunk name>
 func v1Schema(cfg SchemaConfig) Schema {
 	return schema{
-		hourlyBucketer{cfg: cfg},
+		cfg.hourlyBuckets,
 		originalEntries{},
 	}
 }
@@ -81,7 +81,7 @@ func v1Schema(cfg SchemaConfig) Schema {
 // - hash key: <userid>:d<day bucket>:<metric name>
 func v2Schema(cfg SchemaConfig) Schema {
 	return schema{
-		dailyBucketer{cfg: cfg},
+		cfg.dailyBuckets,
 		originalEntries{},
 	}
 }
@@ -90,7 +90,7 @@ func v2Schema(cfg SchemaConfig) Schema {
 // - range key: <label name>\0<base64(label value)>\0<chunk name>\0<version 1>
 func v3Schema(cfg SchemaConfig) Schema {
 	return schema{
-		dailyBucketer{cfg: cfg},
+		cfg.dailyBuckets,
 		base64Entries{originalEntries{}},
 	}
 }
@@ -102,7 +102,7 @@ func v3Schema(cfg SchemaConfig) Schema {
 //    - range key: \0\0<chunk name>\0<version 3>
 func v4Schema(cfg SchemaConfig) Schema {
 	return schema{
-		dailyBucketer{cfg: cfg},
+		cfg.dailyBuckets,
 		labelNameInHashKeyEntries{},
 	}
 }
@@ -112,7 +112,7 @@ func v4Schema(cfg SchemaConfig) Schema {
 // so the chunk end times are ignored.
 func v5Schema(cfg SchemaConfig) Schema {
 	return schema{
-		dailyBucketer{cfg: cfg},
+		cfg.dailyBuckets,
 		v5Entries{},
 	}
 }
@@ -121,7 +121,7 @@ func v5Schema(cfg SchemaConfig) Schema {
 // the label value moved out of the range key.
 func v6Schema(cfg SchemaConfig) Schema {
 	return schema{
-		dailyBucketer{cfg: cfg},
+		cfg.dailyBuckets,
 		v6Entries{},
 	}
 }
@@ -129,21 +129,21 @@ func v6Schema(cfg SchemaConfig) Schema {
 // v9 schema index series, not chunks.
 func v9Schema(cfg SchemaConfig) Schema {
 	return schema{
-		dailyBucketer{cfg: cfg},
+		cfg.dailyBuckets,
 		v9Entries{},
 	}
 }
 
 // schema implements Schema given a bucketing function and and set of range key callbacks
 type schema struct {
-	buckets buckets
+	buckets func(from, through model.Time, userID string) []Bucket
 	entries entries
 }
 
 func (s schema) GetWriteEntries(from, through model.Time, userID string, metricName model.LabelValue, labels model.Metric, chunkID string) ([]IndexEntry, error) {
 	var result []IndexEntry
 
-	for _, bucket := range s.buckets.Buckets(from, through, userID) {
+	for _, bucket := range s.buckets(from, through, userID) {
 		entries, err := s.entries.GetWriteEntries(bucket, metricName, labels, chunkID)
 		if err != nil {
 			return nil, err
@@ -156,7 +156,7 @@ func (s schema) GetWriteEntries(from, through model.Time, userID string, metricN
 func (s schema) GetReadQueriesForMetric(from, through model.Time, userID string, metricName model.LabelValue) ([]IndexQuery, error) {
 	var result []IndexQuery
 
-	buckets := s.buckets.Buckets(from, through, userID)
+	buckets := s.buckets(from, through, userID)
 	for _, bucket := range buckets {
 		entries, err := s.entries.GetReadMetricQueries(bucket, metricName)
 		if err != nil {
@@ -170,7 +170,7 @@ func (s schema) GetReadQueriesForMetric(from, through model.Time, userID string,
 func (s schema) GetReadQueriesForMetricLabel(from, through model.Time, userID string, metricName model.LabelValue, labelName model.LabelName) ([]IndexQuery, error) {
 	var result []IndexQuery
 
-	buckets := s.buckets.Buckets(from, through, userID)
+	buckets := s.buckets(from, through, userID)
 	for _, bucket := range buckets {
 		entries, err := s.entries.GetReadMetricLabelQueries(bucket, metricName, labelName)
 		if err != nil {
@@ -184,7 +184,7 @@ func (s schema) GetReadQueriesForMetricLabel(from, through model.Time, userID st
 func (s schema) GetReadQueriesForMetricLabelValue(from, through model.Time, userID string, metricName model.LabelValue, labelName model.LabelName, labelValue model.LabelValue) ([]IndexQuery, error) {
 	var result []IndexQuery
 
-	buckets := s.buckets.Buckets(from, through, userID)
+	buckets := s.buckets(from, through, userID)
 	for _, bucket := range buckets {
 		entries, err := s.entries.GetReadMetricLabelValueQueries(bucket, metricName, labelName, labelValue)
 		if err != nil {
@@ -198,7 +198,7 @@ func (s schema) GetReadQueriesForMetricLabelValue(from, through model.Time, user
 func (s schema) GetChunksForSeries(from, through model.Time, userID string, seriesID []byte) ([]IndexQuery, error) {
 	var result []IndexQuery
 
-	buckets := s.buckets.Buckets(from, through, userID)
+	buckets := s.buckets(from, through, userID)
 	for _, bucket := range buckets {
 		entries, err := s.entries.GetChunksForSeries(bucket, seriesID)
 		if err != nil {
@@ -207,10 +207,6 @@ func (s schema) GetChunksForSeries(from, through model.Time, userID string, seri
 		result = append(result, entries...)
 	}
 	return result, nil
-}
-
-type buckets interface {
-	Buckets(from, through model.Time, userID string) []Bucket
 }
 
 type entries interface {
