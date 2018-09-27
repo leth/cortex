@@ -1,0 +1,41 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: bryan-dynamodb-scanner
+  namespace: cortex
+spec:
+  template:
+    metadata:
+      labels:
+        name: bryan-dynamodb-scanner
+    spec:
+      imagePullSecrets:
+      - name: quay-secret
+      containers:
+      - name: scanner
+        image: quay.io/weaveworks/cortex-scanner:dynamodb-scanning-62ea4521
+        imagePullPolicy: Always
+        args:
+        - -week=2478
+        - -segments=8
+        - -writers=16
+        - -writer-rate-limit=1100
+        - -pages-per-dot=100
+        - -dynamodb.url=dynamodb://us-east-1/
+        - -dynamodb.chunk-table.prefix=dev_chunk_data_weekly_
+        - -s3.url=s3://not:used@xxxxxxxx:0
+        - -dynamodb.reindex-prefix=dev_chunk_index2_weekly_
+        - -dynamodb.use-periodic-tables=true
+        - -dynamodb.v9-schema-from=2017-01-10
+        - -memcache.write-back-goroutines=1 
+        env:
+        - name: AWS_ACCESS_KEY_ID
+          value: "redacted"
+        - name: AWS_SECRET_ACCESS_KEY
+          value: "redacted"
+        - name: AWS_SESSION_TOKEN
+          value: "redacted"
+        ports:
+        - containerPort: 6060
+      restartPolicy: Never
+  backoffLimit: 1
