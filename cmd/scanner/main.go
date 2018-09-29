@@ -41,6 +41,7 @@ func main() {
 		loglevel  string
 		address   string
 
+		rechunkTablePrefix string
 		reindexTablePrefix string
 	)
 
@@ -51,6 +52,7 @@ func main() {
 	flag.StringVar(&orgsFile, "delete-orgs-file", "", "File containing IDs of orgs to delete")
 	flag.StringVar(&loglevel, "log-level", "info", "Debug level: debug, info, warning, error")
 	flag.IntVar(&pagesPerDot, "pages-per-dot", 10, "Print a dot per N pages in DynamoDB (0 to disable)")
+	flag.StringVar(&rechunkTablePrefix, "dynamodb.rechunk-prefix", "", "Prefix of new chunk table (blank to disable)")
 	flag.StringVar(&reindexTablePrefix, "dynamodb.reindex-prefix", "", "Prefix of new index table (blank to disable)")
 
 	flag.Parse()
@@ -87,9 +89,11 @@ func main() {
 	chunkStore, err := chunk.NewStore(chunkStoreConfig, schemaConfig, storageOpts)
 	checkFatal(err)
 	defer chunkStore.Stop()
+
 	var reindexStore chunk.Store
-	if reindexTablePrefix != "" {
+	if reindexTablePrefix != "" || rechunkTablePrefix != "" {
 		reindexSchemaConfig := schemaConfig
+		reindexSchemaConfig.ChunkTables.Prefix = rechunkTablePrefix
 		reindexSchemaConfig.IndexTables.Prefix = reindexTablePrefix
 		// Note we rely on aws storageClient not using its schemaConfig on the write path
 		reindexStore, err = chunk.NewStore(chunkStoreConfig, reindexSchemaConfig, storageOpts)
@@ -102,7 +106,7 @@ func main() {
 	handlers := make([]handler, segments)
 	callbacks := make([]func(result chunk.ReadBatch), segments)
 	for segment := 0; segment < segments; segment++ {
-		handlers[segment] = newHandler(reindexStore, tableName, reindexTablePrefix, orgs)
+		handlers[segment] = newHandler(reindexStore, rechunkTablePrefix, reindexTablePrefix, orgs)
 		callbacks[segment] = handlers[segment].handlePage
 	}
 
@@ -178,17 +182,21 @@ func (h *handler) handlePage(page chunk.ReadBatch) {
 			//request := h.storageClient.NewWriteBatch()
 			//request.AddDelete(h.tableName, hashValue, page.RangeValue(i))
 			//			h.requests <- request
-		} else if h.reindexTablePrefix != "" {
+		} else if h.store != nil {
 			var ch chunk.Chunk
 			err := ch.Decode(decodeContext, i.Value())
 			if err != nil {
 				level.Error(util.Logger).Log("msg", "chunk decode error", "err", err)
 				continue
 			}
-			err = h.store.IndexChunk(ctx, ch)
-			if err != nil {
-				level.Error(util.Logger).Log("msg", "indexing error", "err", err)
-				continue
+			if h.tableName == "" { // just write index entries
+				err = h.store.IndexChunk(ctx, ch)
+				if err != nil {
+					level.Error(util.Logger).Log("msg", "indexing error", "err", err)
+					continue
+				}
+			} else {
+				h.store.Put(ctx, []chunk.Chunk{ch})
 			}
 		}
 	}
