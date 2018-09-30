@@ -184,6 +184,11 @@ var writerPool = sync.Pool{
 	New: func() interface{} { return snappy.NewBufferedWriter(nil) },
 }
 
+func (c *Chunk) ForceEncode() {
+	c.encoded = nil
+	c.Encode()
+}
+
 // Encode writes the chunk out to a big write buffer, then calculates the checksum.
 func (c *Chunk) Encode() ([]byte, error) {
 	if c.encoded != nil {

@@ -197,6 +197,7 @@ func (h *handler) handlePage(page chunk.ReadBatch) {
 					continue
 				}
 			} else {
+				ch.ForceEncode()
 				err = h.store.Put(ctx, []chunk.Chunk{ch})
 				if err != nil {
 					level.Error(util.Logger).Log("msg", "put error", "err", err)
