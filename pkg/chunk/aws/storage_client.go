@@ -30,6 +30,7 @@ import (
 	"github.com/weaveworks/common/instrument"
 	"github.com/weaveworks/common/user"
 	"github.com/weaveworks/cortex/pkg/chunk"
+	chunk_util "github.com/weaveworks/cortex/pkg/chunk/util"
 	"github.com/weaveworks/cortex/pkg/util"
 )
 
@@ -298,7 +299,7 @@ func (a storageClient) BatchWriteNoRetry(ctx context.Context, batch chunk.WriteB
 		for tableName := range requests {
 			recordDynamoError(tableName, err, "DynamoDB.BatchWriteItem")
 		}
-		if !shouldAbort(err) && (throttled(err) || request.Retryable()) {
+		if throttled(err) || request.Retryable() {
 			// Send the whole request back
 			return requests, nil
 		} else {
@@ -309,57 +310,17 @@ func (a storageClient) BatchWriteNoRetry(ctx context.Context, batch chunk.WriteB
 	return dynamoDBWriteBatch(resp.UnprocessedItems), nil
 }
 
-// we don't have any way to get new credentials in a running process, so give up now
-func shouldAbort(err error) bool {
-	awsErr, ok := err.(awserr.Error)
-	return ok && (awsErr.Code() == "ExpiredTokenException")
-}
-
 func throttled(err error) bool {
 	awsErr, ok := err.(awserr.Error)
 	return ok && (awsErr.Code() == dynamodb.ErrCodeProvisionedThroughputExceededException)
 }
 
-const maxQueryBatch = 100
-
 func (a storageClient) QueryPages(ctx context.Context, queries []chunk.IndexQuery, callback func(chunk.IndexQuery, chunk.ReadBatch) bool) error {
-	sp, ctx := ot.StartSpanFromContext(ctx, "QueryPages")
-	defer sp.Finish()
-	// Group queries by table and hash key, so we can send to DynamoDB in batches
-	groupedQueries := map[string][]chunk.IndexQuery{}
-	for _, query := range queries {
-		key := query.TableName + ":" + query.HashValue
-		groupedQueries[key] = append(groupedQueries[key], query)
-	}
-
-	// Now fire off parallel requests to DynamoDB for up to 100 range-values
-	incomingErrors := make(chan error)
-	for _, group := range groupedQueries {
-		for i := 0; i < len(group); i += maxQueryBatch {
-			page := group[i:util.Min(i+maxQueryBatch, len(group))]
-			go func(group []chunk.IndexQuery) {
-				incomingErrors <- a.queryGroup(ctx, page, callback)
-			}(group)
-		}
-	}
-	var lastErr error
-	for i := 0; i < len(groupedQueries); i++ {
-		err := <-incomingErrors
-		if err != nil {
-
-			lastErr = err
-		}
-	}
-	return lastErr
+	return chunk_util.DoParallelQueries(ctx, a.query, queries, callback)
 }
 
-// run a group of index queries, all for the same table and hashkey
-func (a storageClient) queryGroup(ctx context.Context, group []chunk.IndexQuery, callback func(query chunk.IndexQuery, result chunk.ReadBatch) (shouldContinue bool)) error {
-	if len(group) == 0 {
-		return nil
-	}
-	query := group[0]
-	sp, ctx := ot.StartSpanFromContext(ctx, "queryGroup", ot.Tag{Key: "tableName", Value: query.TableName}, ot.Tag{Key: "hashValue", Value: query.HashValue})
+func (a storageClient) query(ctx context.Context, query chunk.IndexQuery, callback func(result chunk.ReadBatch) (shouldContinue bool)) error {
+	sp, ctx := ot.StartSpanFromContext(ctx, "QueryPages", ot.Tag{Key: "tableName", Value: query.TableName}, ot.Tag{Key: "hashValue", Value: query.HashValue})
 	defer sp.Finish()
 
 	input := &dynamodb.QueryInput{
@@ -375,21 +336,19 @@ func (a storageClient) queryGroup(ctx context.Context, group []chunk.IndexQuery,
 		ReturnConsumedCapacity: aws.String(dynamodb.ReturnConsumedCapacityTotal),
 	}
 
-	for _, query := range group {
-		if query.RangeValuePrefix != nil {
-			input.KeyConditions[rangeKey] = &dynamodb.Condition{
-				AttributeValueList: []*dynamodb.AttributeValue{
-					{B: query.RangeValuePrefix},
-				},
-				ComparisonOperator: aws.String(dynamodb.ComparisonOperatorBeginsWith),
-			}
-		} else if query.RangeValueStart != nil {
-			input.KeyConditions[rangeKey] = &dynamodb.Condition{
-				AttributeValueList: []*dynamodb.AttributeValue{
-					{B: query.RangeValueStart},
-				},
-				ComparisonOperator: aws.String(dynamodb.ComparisonOperatorGe),
-			}
+	if query.RangeValuePrefix != nil {
+		input.KeyConditions[rangeKey] = &dynamodb.Condition{
+			AttributeValueList: []*dynamodb.AttributeValue{
+				{B: query.RangeValuePrefix},
+			},
+			ComparisonOperator: aws.String(dynamodb.ComparisonOperatorBeginsWith),
+		}
+	} else if query.RangeValueStart != nil {
+		input.KeyConditions[rangeKey] = &dynamodb.Condition{
+			AttributeValueList: []*dynamodb.AttributeValue{
+				{B: query.RangeValueStart},
+			},
+			ComparisonOperator: aws.String(dynamodb.ComparisonOperatorGe),
 		}
 	}
 
@@ -417,7 +376,7 @@ func (a storageClient) queryGroup(ctx context.Context, group []chunk.IndexQuery,
 			return err
 		}
 
-		if !callback(query, response) {
+		if !callback(response) {
 			if err != nil {
 				return fmt.Errorf("QueryPages error: table=%v, err=%v", *input.TableName, page.Error())
 			}
