@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/prometheus/common/model"
+	yaml "gopkg.in/yaml.v2"
 
 	"github.com/cortexproject/cortex/pkg/util"
 	"github.com/weaveworks/common/mtime"
@@ -19,8 +20,21 @@ const (
 	millisecondsInDay  = int64(24 * time.Hour / time.Millisecond)
 )
 
+type SingleSchemaConfig struct {
+	From        time.Time     `yaml:"from"`
+	IndexSchema string        `yaml:"index_schema"`
+	TablePrefix string        `yaml:"table_prefix"`
+	IndexPrefix string        `yaml:"index_prefix"`
+	Period      time.Duration `yaml:"period"`
+	Tags        Tags          `yaml:"tags"`
+}
+
 // SchemaConfig contains the config for our chunk index schemas
 type SchemaConfig struct {
+	Configs []SingleSchemaConfig `yaml:"configs"`
+}
+
+type LegacySchemaConfig struct {
 	// After midnight on this day, we start bucketing indexes by day instead of by
 	// hour.  Only the day matters, not the time within the day.
 	DailyBucketsFrom      util.DayValue
@@ -48,7 +62,7 @@ type SchemaConfig struct {
 }
 
 // RegisterFlags adds the flags required to config this to the given FlagSet.
-func (cfg *SchemaConfig) RegisterFlags(f *flag.FlagSet) {
+func (cfg *LegacySchemaConfig) RegisterFlags(f *flag.FlagSet) {
 	f.Var(&cfg.DailyBucketsFrom, "dynamodb.daily-buckets-from", "The date (in the format YYYY-MM-DD) of the first day for which DynamoDB index buckets should be day-sized vs. hour-sized.")
 	f.Var(&cfg.Base64ValuesFrom, "dynamodb.base64-buckets-from", "The date (in the format YYYY-MM-DD) after which we will stop querying to non-base64 encoded values.")
 	f.Var(&cfg.V4SchemaFrom, "dynamodb.v4-schema-from", "The date (in the format YYYY-MM-DD) after which we enable v4 schema.")
@@ -74,6 +88,23 @@ func (cfg *SchemaConfig) tableForBucket(bucketStart int64) string {
 	}
 	// TODO remove reference to time package here
 	return cfg.IndexTables.Prefix + strconv.Itoa(int(bucketStart/int64(cfg.IndexTables.Period/time.Second)))
+}
+
+func loadConfig(filename string) (SchemaConfig, error) {
+	f, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+
+	var config SchemaConfig
+
+	decoder := yaml.NewDecoder(f)
+	decoder.SetStrict(true)
+	if err := decoder.Decode(&config); err != nil {
+		return nil, err
+	}
+
+	return config, nil
 }
 
 // Bucket describes a range of time with a tableName and hashKey

@@ -43,68 +43,63 @@ type SchemaOpt struct {
 
 // SchemaOpts returns the schemas and the times when they activate.
 func SchemaOpts(cfg StoreConfig, schemaCfg SchemaConfig) []SchemaOpt {
-	opts := []SchemaOpt{{
-		From: 0,
-		NewStore: func(storage StorageClient) (Store, error) {
-			return newStore(cfg, v1Schema(schemaCfg), storage)
-		},
-	}}
+	opts := []SchemaOpt{}
+	for config := range schemaCfg.Configs {
+		var f func(storage StorageClient) (Store, error)
+		switch config.IndexSchema {
+		case "v1":
+			f := newStore(cfg, v1Schema(schemaCfg), storage)
+		case "v2":
+			f := newStore(cfg, v2Schema(schemaCfg), storage)
+		case "v3":
+			f := newStore(cfg, v3Schema(schemaCfg), storage)
+		case "v4":
+			f := newStore(cfg, v4Schema(schemaCfg), storage)
+		case "v5":
+			f := newStore(cfg, v5Schema(schemaCfg), storage)
+		case "v6":
+			f := newStore(cfg, v6Schema(schemaCfg), storage)
+		case "v9":
+			f := newSeriesStore(cfg, v9Schema(schemaCfg), storage)
+		}
+		opts = append(opts, SchemaOpt{From: config.From, NewStore: f})
+	}
+}
 
+func (schemaCfg *LegacySchemaConfig) config() SchemaConfig {
+	config := func(t string, f time.Time) SingleSchemaConfig {
+		return SingleSchemaConfig{
+			From:        0,
+			IndexSchema: "v1",
+			TablePrefix: schemaCfg.ChunkTables.Prefix,
+			Period:      x,
+			Tags:        y,
+		}
+	}
+
+	cfg := SchemaConfig{
+		Configs: config("v1", 0),
+	}
 	if schemaCfg.DailyBucketsFrom.IsSet() {
-		opts = append(opts, SchemaOpt{
-			From: schemaCfg.DailyBucketsFrom.Time,
-			NewStore: func(storage StorageClient) (Store, error) {
-				return newStore(cfg, v2Schema(schemaCfg), storage)
-			},
-		})
+		cfg.Configs = append(cfg.Configs, config("v2", schemaCfg.DailyBucketsFrom.Time))
 	}
-
 	if schemaCfg.Base64ValuesFrom.IsSet() {
-		opts = append(opts, SchemaOpt{
-			From: schemaCfg.Base64ValuesFrom.Time,
-			NewStore: func(storage StorageClient) (Store, error) {
-				return newStore(cfg, v3Schema(schemaCfg), storage)
-			},
-		})
+		cfg.Configs = append(cfg.Configs, config("v3", schemaCfg.Base64ValuesFrom.Time))
 	}
-
 	if schemaCfg.V4SchemaFrom.IsSet() {
-		opts = append(opts, SchemaOpt{
-			From: schemaCfg.V4SchemaFrom.Time,
-			NewStore: func(storage StorageClient) (Store, error) {
-				return newStore(cfg, v4Schema(schemaCfg), storage)
-			},
-		})
+		cfg.Configs = append(cfg.Configs, config("v4", schemaCfg.V4SchemaFrom.Time))
 	}
-
 	if schemaCfg.V5SchemaFrom.IsSet() {
-		opts = append(opts, SchemaOpt{
-			From: schemaCfg.V5SchemaFrom.Time,
-			NewStore: func(storage StorageClient) (Store, error) {
-				return newStore(cfg, v5Schema(schemaCfg), storage)
-			},
-		})
+		cfg.Configs = append(cfg.Configs, config("v5", schemaCfg.V5SchemaFrom.Time))
 	}
-
 	if schemaCfg.V6SchemaFrom.IsSet() {
-		opts = append(opts, SchemaOpt{
-			From: schemaCfg.V6SchemaFrom.Time,
-			NewStore: func(storage StorageClient) (Store, error) {
-				return newStore(cfg, v6Schema(schemaCfg), storage)
-			},
-		})
+		cfg.Configs = append(cfg.Configs, config("v6", schemaCfg.V6SchemaFrom.Time))
 	}
-
 	if schemaCfg.V9SchemaFrom.IsSet() {
-		opts = append(opts, SchemaOpt{
-			From: schemaCfg.V9SchemaFrom.Time,
-			NewStore: func(storage StorageClient) (Store, error) {
-				return newSeriesStore(cfg, v9Schema(schemaCfg), storage)
-			},
-		})
+		cfg.Configs = append(cfg.Configs, config("v9", schemaCfg.V9SchemaFrom.Time))
 	}
 
-	return opts
+	return config
 }
 
 // StorageOpt stores when a StorageClient is to be used.
