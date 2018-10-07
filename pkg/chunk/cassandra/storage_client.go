@@ -278,7 +278,7 @@ func (s *storageClient) PutChunks(ctx context.Context, chunks []chunk.Chunk) err
 			return errors.WithStack(err)
 		}
 		key := chunks[i].ExternalKey()
-		tableName := s.schemaCfg.ChunkTables.TableFor(chunks[i].From)
+		tableName := s.schemaCfg.ChunkTableFor(chunks[i].From)
 
 		// Must provide a range key, even though its not useds - hence 0x00.
 		q := s.session.Query(fmt.Sprintf("INSERT INTO %s (hash, range, value) VALUES (?, 0x00, ?)",
@@ -321,7 +321,7 @@ func (s *storageClient) GetChunks(ctx context.Context, input []chunk.Chunk) ([]c
 }
 
 func (s *storageClient) getChunk(ctx context.Context, input chunk.Chunk) (chunk.Chunk, error) {
-	tableName := s.schemaCfg.ChunkTables.TableFor(input.From)
+	tableName := s.schemaCfg.ChunkTableFor(input.From)
 	var buf []byte
 	if err := s.session.Query(fmt.Sprintf("SELECT value FROM %s WHERE hash = ?", tableName), input.ExternalKey()).
 		WithContext(ctx).Scan(&buf); err != nil {

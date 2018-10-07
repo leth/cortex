@@ -42,7 +42,7 @@ func (cfg *Config) RegisterFlags(f *flag.FlagSet) {
 }
 
 // Opts makes the storage clients based on the configuration.
-func Opts(cfg Config, schemaCfg chunk.SchemaConfig) ([]chunk.StorageOpt, error) {
+func NewStore(cfg Config, storeCfg chunk.StoreConfig, schemaCfg chunk.SchemaConfig) (chunk.Store, error) {
 	var caches []cache.Cache
 	if cfg.IndexCacheSize > 0 {
 		fifocache := cache.Instrument("fifo-index", cache.NewFifoCache("index", cfg.IndexCacheSize, cfg.IndexCacheValidity))
@@ -60,26 +60,51 @@ func Opts(cfg Config, schemaCfg chunk.SchemaConfig) ([]chunk.StorageOpt, error) 
 		}, memcache))
 	}
 
-	opts, err := newStorageOpts(cfg, schemaCfg)
-	if err != nil {
-		return nil, errors.Wrap(err, "error creating storage client")
-	}
-
+	var tieredCache cache.Cache
 	if len(caches) > 0 {
-		tieredCache := cache.Instrument("tiered-index", cache.NewTiered(caches))
-		for i := range opts {
-			opts[i].Client = newCachingStorageClient(opts[i].Client, tieredCache, cfg.IndexCacheValidity)
-		}
+		tieredCache = cache.Instrument("tiered-index", cache.NewTiered(caches))
 	}
 
-	return opts, nil
+	stores := []chunk.CompositeStoreEntry{}
+
+	for _, s := range schemaCfg.Configs {
+		storage, err := nameToStorage(s.Store, cfg, schemaCfg)
+		if err != nil {
+			return nil, errors.Wrap(err, "error creating storage client")
+		}
+
+		if tieredCache != nil {
+			storage = newCachingStorageClient(storage, tieredCache, cfg.IndexCacheValidity)
+		}
+
+		c, err := chunk.NewCompositeStoreEntry(storeCfg, s, storage)
+		if err != nil {
+			return nil, err
+		}
+		stores = append(stores, c)
+	}
+
+	return chunk.NewStore(stores)
 }
 
-func newStorageOpts(cfg Config, schemaCfg chunk.SchemaConfig) ([]chunk.StorageOpt, error) {
-	switch cfg.StorageClient {
+func HandleLegacyConfig(legacy chunk.LegacySchemaConfig, schemaCfg chunk.SchemaConfig) {
+	if legacy.ChunkTablesFrom.IsSet() {
+		schemaCfg.ForEachAfter(legacy.ChunkTablesFrom.Time, func(config *chunk.PeriodConfig) {
+			config.Store = "aws-dynamo"
+		})
+	}
+	if legacy.BigtableColumnKeyFrom.IsSet() {
+		// FIXME
+	}
+}
+
+func nameToStorage(name string, cfg Config, schemaCfg chunk.SchemaConfig) (chunk.StorageClient, error) {
+	switch name {
 	case "inmemory":
-		return chunk.Opts()
+		return chunk.NewMockStorage(), nil
 	case "aws":
+		return aws.NewS3StorageClient(cfg.AWSStorageConfig, schemaCfg)
+	case "aws-dynamo":
 		if cfg.AWSStorageConfig.DynamoDB.URL == nil {
 			return nil, fmt.Errorf("Must set -dynamodb.url in aws mode")
 		}
@@ -87,14 +112,15 @@ func newStorageOpts(cfg Config, schemaCfg chunk.SchemaConfig) ([]chunk.StorageOp
 		if len(path) > 0 {
 			level.Warn(util.Logger).Log("msg", "ignoring DynamoDB URL path", "path", path)
 		}
-		return aws.Opts(cfg.AWSStorageConfig, schemaCfg)
+		return aws.NewStorageClient(cfg.AWSStorageConfig.DynamoDBConfig, schemaCfg)
 	case "gcp":
-		return gcp.Opts(context.Background(), cfg.GCPStorageConfig, schemaCfg)
+		return gcp.NewStorageClientV1(context.Background(), cfg.GCPStorageConfig, schemaCfg)
+	case "gcp-columnkey":
+		return gcp.NewStorageClientColumnKey(context.Background(), cfg.GCPStorageConfig, schemaCfg)
 	case "cassandra":
-		return cassandra.Opts(cfg.CassandraStorageConfig, schemaCfg)
-	default:
-		return nil, fmt.Errorf("Unrecognized storage client %v, choose one of: aws, gcp, cassandra, inmemory", cfg.StorageClient)
+		return cassandra.NewStorageClient(cfg.CassandraStorageConfig, schemaCfg)
 	}
+	return nil, fmt.Errorf("Unrecognized storage client %v, choose one of: aws, gcp, cassandra, inmemory", name)
 }
 
 // NewTableClient makes a new table client based on the configuration.

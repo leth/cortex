@@ -22,42 +22,41 @@ import (
 	"github.com/weaveworks/common/user"
 )
 
-type schemaFactory func(cfg SchemaConfig) Schema
 type storeFactory func(StoreConfig, Schema, StorageClient) (Store, error)
 
 var schemas = []struct {
 	name              string
-	schemaFn          schemaFactory
 	storeFn           storeFactory
 	requireMetricName bool
 }{
-	{"v1 schema", v1Schema, newStore, true},
-	{"v2 schema", v2Schema, newStore, true},
-	{"v3 schema", v3Schema, newStore, true},
-	{"v4 schema", v4Schema, newStore, true},
-	{"v5 schema", v5Schema, newStore, true},
-	{"v6 schema", v6Schema, newStore, true},
-	{"v9 schema", v9Schema, newSeriesStore, true},
+	{"v1", newStore, true},
+	{"v2", newStore, true},
+	{"v3", newStore, true},
+	{"v4", newStore, true},
+	{"v5", newStore, true},
+	{"v6", newStore, true},
+	{"v9", newSeriesStore, true},
 }
 
 // newTestStore creates a new Store for testing.
-func newTestChunkStore(t *testing.T, schemaFactory schemaFactory, storeFactory storeFactory) Store {
+func newTestChunkStore(t *testing.T, name string, storeFactory storeFactory) Store {
 	var (
 		storeCfg  StoreConfig
-		schemaCfg SchemaConfig
+		tbmConfig TableManagerConfig
+		schemaCfg = DefaultSchemaConfig("", 0)
 	)
-	util.DefaultValues(&storeCfg, &schemaCfg)
+	util.DefaultValues(&storeCfg, &tbmConfig)
 
 	storage := NewMockStorage()
-	tableManager, err := NewTableManager(schemaCfg, maxChunkAge, storage)
+	tableManager, err := NewTableManager(tbmConfig, schemaCfg, maxChunkAge, storage)
 	require.NoError(t, err)
 
 	err = tableManager.SyncTables(context.Background())
 	require.NoError(t, err)
 
-	store, err := storeFactory(storeCfg, schemaFactory(schemaCfg), storage)
+	c, err := NewCompositeStoreEntry(storeCfg, schemaCfg.Configs[0], storage)
 	require.NoError(t, err)
-	return store
+	return c.Store
 }
 
 func createSampleStreamFrom(chunk Chunk) (*model.SampleStream, error) {
@@ -204,7 +203,7 @@ func TestChunkStore_Get(t *testing.T) {
 		for _, schema := range schemas {
 			t.Run(fmt.Sprintf("%s / %s", tc.query, schema.name), func(t *testing.T) {
 				t.Log("========= Running query", tc.query, "with schema", schema.name)
-				store := newTestChunkStore(t, schema.schemaFn, schema.storeFn)
+				store := newTestChunkStore(t, schema.name, schema.storeFn)
 				defer store.Stop()
 
 				if err := store.Put(ctx, []Chunk{
@@ -322,7 +321,7 @@ func TestChunkStore_getMetricNameChunks(t *testing.T) {
 		for _, schema := range schemas {
 			t.Run(fmt.Sprintf("%s / %s", tc.query, schema.name), func(t *testing.T) {
 				t.Log("========= Running query", tc.query, "with schema", schema.name)
-				store := newTestChunkStore(t, schema.schemaFn, schema.storeFn)
+				store := newTestChunkStore(t, schema.name, schema.storeFn)
 				defer store.Stop()
 
 				if err := store.Put(ctx, []Chunk{chunk1, chunk2}); err != nil {
@@ -358,7 +357,7 @@ func TestChunkStoreRandom(t *testing.T) {
 
 	for _, schema := range schemas {
 		t.Run(schema.name, func(t *testing.T) {
-			store := newTestChunkStore(t, schema.schemaFn, schema.storeFn)
+			store := newTestChunkStore(t, schema.name, schema.storeFn)
 			defer store.Stop()
 
 			// put 100 chunks from 0 to 99

@@ -44,7 +44,7 @@ func main() {
 		limits            validation.Limits
 		querierConfig     querier.Config
 		chunkStoreConfig  chunk.StoreConfig
-		schemaConfig      chunk.SchemaConfig
+		schemaConfig      chunk.LegacySchemaConfig
 		storageConfig     storage.Config
 		workerConfig      frontend.WorkerConfig
 		queryParallelism  int
@@ -54,6 +54,9 @@ func main() {
 	flag.IntVar(&queryParallelism, "querier.query-parallelism", 100, "Max subqueries run in parallel per higher-level query.")
 	flag.Parse()
 	chunk_util.QueryParallelism = queryParallelism
+
+	schemaConfig.TranslateConfig().PrintYaml()
+	return
 
 	// Setting the environment variable JAEGER_AGENT_HOST enables tracing
 	trace := tracing.NewFromEnv("querier")
@@ -84,15 +87,9 @@ func main() {
 	defer server.Shutdown()
 	server.HTTP.Handle("/ring", r)
 
-	storageOpts, err := storage.Opts(storageConfig, schemaConfig)
+	chunkStore, err := storage.NewStore(storageConfig, chunkStoreConfig, schemaConfig.TranslateConfig())
 	if err != nil {
 		level.Error(util.Logger).Log("msg", "error initializing storage client", "err", err)
-		os.Exit(1)
-	}
-
-	chunkStore, err := chunk.NewStore(chunkStoreConfig, schemaConfig, storageOpts)
-	if err != nil {
-		level.Error(util.Logger).Log("err", err)
 		os.Exit(1)
 	}
 	defer chunkStore.Stop()

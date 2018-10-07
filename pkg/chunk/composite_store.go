@@ -6,8 +6,6 @@ import (
 
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/pkg/labels"
-
-	"github.com/cortexproject/cortex/pkg/chunk/cache"
 )
 
 // Store for chunks.
@@ -21,86 +19,19 @@ type Store interface {
 // compositeStore is a Store which delegates to various stores depending
 // on when they were activated.
 type compositeStore struct {
-	stores []compositeStoreEntry
+	stores []CompositeStoreEntry
 }
 
-type compositeStoreEntry struct {
+type CompositeStoreEntry struct {
 	start model.Time
 	Store
 }
 
-type byStart []compositeStoreEntry
+type byStart []CompositeStoreEntry
 
 func (a byStart) Len() int           { return len(a) }
 func (a byStart) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 func (a byStart) Less(i, j int) bool { return a[i].start < a[j].start }
-
-// SchemaOpt stores when a schema starts.
-type SchemaOpt struct {
-	From     model.Time
-	NewStore func(StorageClient) (Store, error)
-}
-
-// SchemaOpts returns the schemas and the times when they activate.
-func SchemaOpts(cfg StoreConfig, schemaCfg SchemaConfig) []SchemaOpt {
-	opts := []SchemaOpt{}
-	for config := range schemaCfg.Configs {
-		var f func(storage StorageClient) (Store, error)
-		switch config.IndexSchema {
-		case "v1":
-			f := newStore(cfg, v1Schema(schemaCfg), storage)
-		case "v2":
-			f := newStore(cfg, v2Schema(schemaCfg), storage)
-		case "v3":
-			f := newStore(cfg, v3Schema(schemaCfg), storage)
-		case "v4":
-			f := newStore(cfg, v4Schema(schemaCfg), storage)
-		case "v5":
-			f := newStore(cfg, v5Schema(schemaCfg), storage)
-		case "v6":
-			f := newStore(cfg, v6Schema(schemaCfg), storage)
-		case "v9":
-			f := newSeriesStore(cfg, v9Schema(schemaCfg), storage)
-		}
-		opts = append(opts, SchemaOpt{From: config.From, NewStore: f})
-	}
-}
-
-func (schemaCfg *LegacySchemaConfig) config() SchemaConfig {
-	config := func(t string, f time.Time) SingleSchemaConfig {
-		return SingleSchemaConfig{
-			From:        0,
-			IndexSchema: "v1",
-			TablePrefix: schemaCfg.ChunkTables.Prefix,
-			Period:      x,
-			Tags:        y,
-		}
-	}
-
-	cfg := SchemaConfig{
-		Configs: config("v1", 0),
-	}
-	if schemaCfg.DailyBucketsFrom.IsSet() {
-		cfg.Configs = append(cfg.Configs, config("v2", schemaCfg.DailyBucketsFrom.Time))
-	}
-	if schemaCfg.Base64ValuesFrom.IsSet() {
-		cfg.Configs = append(cfg.Configs, config("v3", schemaCfg.Base64ValuesFrom.Time))
-	}
-	if schemaCfg.V4SchemaFrom.IsSet() {
-		cfg.Configs = append(cfg.Configs, config("v4", schemaCfg.V4SchemaFrom.Time))
-	}
-	if schemaCfg.V5SchemaFrom.IsSet() {
-		cfg.Configs = append(cfg.Configs, config("v5", schemaCfg.V5SchemaFrom.Time))
-	}
-	if schemaCfg.V6SchemaFrom.IsSet() {
-		cfg.Configs = append(cfg.Configs, config("v6", schemaCfg.V6SchemaFrom.Time))
-	}
-	if schemaCfg.V9SchemaFrom.IsSet() {
-		cfg.Configs = append(cfg.Configs, config("v9", schemaCfg.V9SchemaFrom.Time))
-	}
-
-	return config
-}
 
 // StorageOpt stores when a StorageClient is to be used.
 type StorageOpt struct {
@@ -117,63 +48,7 @@ func latest(a, b model.Time) model.Time {
 
 // NewStore creates a new Store which delegates to different stores depending
 // on time.
-func NewStore(cfg StoreConfig, schemaCfg SchemaConfig, storageOpts []StorageOpt) (Store, error) {
-	cache, err := cache.New(cfg.CacheConfig)
-	if err != nil {
-		return nil, err
-	}
-	cfg.CacheConfig.Cache = cache
-
-	schemaOpts := SchemaOpts(cfg, schemaCfg)
-
-	return newCompositeStore(cfg, schemaCfg, schemaOpts, storageOpts)
-}
-
-func newCompositeStore(cfg StoreConfig, schemaCfg SchemaConfig, schemaOpts []SchemaOpt, storageOpts []StorageOpt) (Store, error) {
-	stores := []compositeStoreEntry{}
-	add := func(i, j int) error {
-		schemaOpt := schemaOpts[i]
-		storageOpt := storageOpts[j]
-		store, err := schemaOpt.NewStore(storageOpt.Client)
-		stores = append(stores, compositeStoreEntry{latest(schemaOpt.From, storageOpt.From), store})
-		return err
-	}
-
-	i, j := 0, 0
-	for i+1 < len(schemaOpts) && j+1 < len(storageOpts) {
-		if err := add(i, j); err != nil {
-			return nil, err
-		}
-
-		// Increment the interval that finished first.
-		nextSchemaOpt := schemaOpts[i+1]
-		nextStorageOpt := storageOpts[j+1]
-		if nextSchemaOpt.From.Before(nextStorageOpt.From) {
-			i++
-		} else if nextSchemaOpt.From.After(nextStorageOpt.From) {
-			j++
-		} else {
-			i++
-			j++
-		}
-	}
-
-	for ; i+1 < len(schemaOpts); i++ {
-		if err := add(i, j); err != nil {
-			return nil, err
-		}
-	}
-
-	for ; j+1 < len(storageOpts); j++ {
-		if err := add(i, j); err != nil {
-			return nil, err
-		}
-	}
-
-	if err := add(i, j); err != nil {
-		return nil, err
-	}
-
+func NewStore(stores []CompositeStoreEntry) (Store, error) {
 	return compositeStore{stores}, nil
 }
 

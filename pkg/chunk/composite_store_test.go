@@ -42,7 +42,7 @@ func TestCompositeStore(t *testing.T) {
 		}
 	}
 	cs := compositeStore{
-		stores: []compositeStoreEntry{
+		stores: []CompositeStoreEntry{
 			{model.TimeFromUnix(0), mockStore(1)},
 			{model.TimeFromUnix(100), mockStore(2)},
 			{model.TimeFromUnix(200), mockStore(3)},
@@ -60,7 +60,7 @@ func TestCompositeStore(t *testing.T) {
 		// Test we have sensible results when there is a single schema
 		{
 			compositeStore{
-				stores: []compositeStoreEntry{
+				stores: []CompositeStoreEntry{
 					{model.TimeFromUnix(0), mockStore(1)},
 				},
 			},
@@ -73,7 +73,7 @@ func TestCompositeStore(t *testing.T) {
 		// Test we have sensible results for negative (ie pre 1970) times
 		{
 			compositeStore{
-				stores: []compositeStoreEntry{
+				stores: []CompositeStoreEntry{
 					{model.TimeFromUnix(0), mockStore(1)},
 				},
 			},
@@ -82,7 +82,7 @@ func TestCompositeStore(t *testing.T) {
 		},
 		{
 			compositeStore{
-				stores: []compositeStoreEntry{
+				stores: []CompositeStoreEntry{
 					{model.TimeFromUnix(0), mockStore(1)},
 				},
 			},
@@ -95,7 +95,7 @@ func TestCompositeStore(t *testing.T) {
 		// Test we have sensible results when there is two schemas
 		{
 			compositeStore{
-				stores: []compositeStoreEntry{
+				stores: []CompositeStoreEntry{
 					{model.TimeFromUnix(0), mockStore(1)},
 					{model.TimeFromUnix(100), mockStore(2)},
 				},
@@ -110,7 +110,7 @@ func TestCompositeStore(t *testing.T) {
 		// Test we get only one result when two schema start at same time
 		{
 			compositeStore{
-				stores: []compositeStoreEntry{
+				stores: []CompositeStoreEntry{
 					{model.TimeFromUnix(0), mockStore(1)},
 					{model.TimeFromUnix(10), mockStore(2)},
 					{model.TimeFromUnix(10), mockStore(3)},
