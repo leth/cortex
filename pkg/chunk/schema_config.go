@@ -69,7 +69,7 @@ func (cfg *LegacySchemaConfig) RegisterFlags(f *flag.FlagSet) {
 
 	f.Var(&cfg.IndexTablesFrom, "dynamodb.periodic-table.from", "Date after which to use periodic tables.")
 	cfg.IndexTables.RegisterFlags("dynamodb.periodic-table", "cortex_", f)
-	f.Var(&cfg.IndexTablesFrom, "dynamodb.chunk-table.from", "Date after which to write chunks to DynamoDB.")
+	f.Var(&cfg.ChunkTablesFrom, "dynamodb.chunk-table.from", "Date after which to write chunks to DynamoDB.")
 	cfg.ChunkTables.RegisterFlags("dynamodb.chunk-table", "cortex_chunks_", f)
 }
 
@@ -134,7 +134,7 @@ func (c *AutoScalingConfig) clean() {
 
 // Given a SchemaConfig, call f() on every entry after t, splitting
 // entries if necessary so there is an entry starting at t
-func (schemaCfg SchemaConfig) ForEachAfter(t model.Time, f func(config *PeriodConfig)) {
+func (schemaCfg *SchemaConfig) ForEachAfter(t model.Time, f func(config *PeriodConfig)) {
 	for i := 0; i < len(schemaCfg.Configs); i++ {
 		if t > schemaCfg.Configs[i].From &&
 			(i+1 == len(schemaCfg.Configs) || t < schemaCfg.Configs[i+1].From) {
@@ -142,7 +142,7 @@ func (schemaCfg SchemaConfig) ForEachAfter(t model.Time, f func(config *PeriodCo
 			schemaCfg.Configs = append(schemaCfg.Configs[:i+1], schemaCfg.Configs[i:]...)
 			schemaCfg.Configs[i+1].From = t
 		}
-		if t >= schemaCfg.Configs[i].From {
+		if schemaCfg.Configs[i].From >= t {
 			f(&schemaCfg.Configs[i])
 		}
 	}
