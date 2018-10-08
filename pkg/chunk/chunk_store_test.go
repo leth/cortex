@@ -39,11 +39,11 @@ var schemas = []struct {
 }
 
 // newTestStore creates a new Store for testing.
-func newTestChunkStore(t *testing.T, name string, storeFactory storeFactory) Store {
+func newTestChunkStore(t *testing.T, schemaName string, storeFactory storeFactory) Store {
 	var (
 		storeCfg  StoreConfig
 		tbmConfig TableManagerConfig
-		schemaCfg = DefaultSchemaConfig("", 0)
+		schemaCfg = DefaultSchemaConfig("", schemaName, 0)
 	)
 	util.DefaultValues(&storeCfg, &tbmConfig)
 
@@ -421,7 +421,7 @@ func TestChunkStoreRandom(t *testing.T) {
 func TestChunkStoreLeastRead(t *testing.T) {
 	// Test we don't read too much from the index
 	ctx := user.InjectOrgID(context.Background(), userID)
-	store := newTestChunkStore(t, v6Schema, newStore)
+	store := newTestChunkStore(t, "v6", newStore)
 	defer store.Stop()
 
 	// Put 24 chunks 1hr chunks in the store
