@@ -48,7 +48,7 @@ func Fixtures() ([]testutils.Fixture, error) {
 	}
 
 	// Get a SchemaConfig with the defaults.
-	schemaConfig := chunk.DefaultSchemaConfig("cassandra", model.Now())
+	schemaConfig := chunk.DefaultSchemaConfig("cassandra", "v1", model.Now())
 
 	storageClient, err := NewStorageClient(cfg, schemaConfig)
 	if err != nil {
