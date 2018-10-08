@@ -148,8 +148,7 @@ func (schemaCfg *SchemaConfig) ForEachAfter(t model.Time, f func(config *PeriodC
 	}
 }
 
-func NewCompositeStoreEntry(storeCfg StoreConfig, cfg PeriodConfig, storage StorageClient) (CompositeStoreEntry, error) {
-	f := newStore
+func (cfg PeriodConfig) createSchema() Schema {
 	var s schema
 	switch cfg.Schema {
 	case "v1":
@@ -166,6 +165,15 @@ func NewCompositeStoreEntry(storeCfg StoreConfig, cfg PeriodConfig, storage Stor
 		s = schema{cfg.dailyBuckets, v6Entries{}}
 	case "v9":
 		s = schema{cfg.dailyBuckets, v9Entries{}}
+	}
+	return s
+}
+
+func NewCompositeStoreEntry(storeCfg StoreConfig, cfg PeriodConfig, storage StorageClient) (CompositeStoreEntry, error) {
+	s := cfg.createSchema()
+	f := newStore
+	switch cfg.Schema {
+	case "v9":
 		f = newSeriesStore
 	}
 	store, err := f(storeCfg, s, storage)
