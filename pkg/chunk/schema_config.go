@@ -35,6 +35,8 @@ type SchemaConfig struct {
 }
 
 type LegacySchemaConfig struct {
+	StorageClient string // aws, gcp, etc.
+
 	// After midnight on this day, we start bucketing indexes by day instead of by
 	// hour.  Only the day matters, not the time within the day.
 	DailyBucketsFrom      util.DayValue
@@ -56,6 +58,7 @@ type LegacySchemaConfig struct {
 
 // RegisterFlags adds the flags required to config this to the given FlagSet.
 func (cfg *LegacySchemaConfig) RegisterFlags(f *flag.FlagSet) {
+	flag.StringVar(&cfg.StorageClient, "chunk.storage-client", "aws", "Which storage client to use (aws, gcp, cassandra, inmemory).")
 	f.Var(&cfg.DailyBucketsFrom, "dynamodb.daily-buckets-from", "The date (in the format YYYY-MM-DD) of the first day for which DynamoDB index buckets should be day-sized vs. hour-sized.")
 	f.Var(&cfg.Base64ValuesFrom, "dynamodb.base64-buckets-from", "The date (in the format YYYY-MM-DD) after which we will stop querying to non-base64 encoded values.")
 	f.Var(&cfg.V4SchemaFrom, "dynamodb.v4-schema-from", "The date (in the format YYYY-MM-DD) after which we enable v4 schema.")
@@ -78,7 +81,7 @@ func (schemaCfg *LegacySchemaConfig) TranslateConfig() SchemaConfig {
 	config := SchemaConfig{}
 
 	add := func(t string, f model.Time) {
-		config.Configs = append(config.Configs, PeriodConfig{From: f, Schema: t})
+		config.Configs = append(config.Configs, PeriodConfig{From: f, Schema: t, Store: schemaCfg.StorageClient})
 	}
 
 	add("v1", 0)
@@ -105,12 +108,17 @@ func (schemaCfg *LegacySchemaConfig) TranslateConfig() SchemaConfig {
 	config.ForEachAfter(schemaCfg.IndexTablesFrom.Time, func(config *PeriodConfig) {
 		config.IndexTables = schemaCfg.IndexTables.clean()
 	})
-	config.ForEachAfter(schemaCfg.ChunkTablesFrom.Time, func(config *PeriodConfig) {
-		config.ChunkTables = schemaCfg.ChunkTables.clean()
-	})
-	config.ForEachAfter(schemaCfg.BigtableColumnKeyFrom.Time, func(config *PeriodConfig) {
-		// FIXME
-	})
+	if schemaCfg.ChunkTablesFrom.IsSet() {
+		config.ForEachAfter(schemaCfg.ChunkTablesFrom.Time, func(config *PeriodConfig) {
+			config.Store = "aws-dynamo"
+			config.ChunkTables = schemaCfg.ChunkTables.clean()
+		})
+	}
+	if schemaCfg.BigtableColumnKeyFrom.IsSet() {
+		config.ForEachAfter(schemaCfg.BigtableColumnKeyFrom.Time, func(config *PeriodConfig) {
+			config.Store = "gcp-columnkey"
+		})
+	}
 
 	return config
 }

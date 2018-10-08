@@ -19,7 +19,6 @@ import (
 
 // Config chooses which storage client to use.
 type Config struct {
-	StorageClient          string
 	AWSStorageConfig       aws.StorageConfig
 	GCPStorageConfig       gcp.Config
 	CassandraStorageConfig cassandra.Config
@@ -31,7 +30,6 @@ type Config struct {
 
 // RegisterFlags adds the flags required to configure this flag set.
 func (cfg *Config) RegisterFlags(f *flag.FlagSet) {
-	flag.StringVar(&cfg.StorageClient, "chunk.storage-client", "aws", "Which storage client to use (aws, gcp, cassandra, inmemory).")
 	cfg.AWSStorageConfig.RegisterFlags(f)
 	cfg.GCPStorageConfig.RegisterFlags(f)
 	cfg.CassandraStorageConfig.RegisterFlags(f)
@@ -41,7 +39,7 @@ func (cfg *Config) RegisterFlags(f *flag.FlagSet) {
 	cfg.memcacheClient.RegisterFlagsWithPrefix("index", f)
 }
 
-// Opts makes the storage clients based on the configuration.
+// NewStore makes the storage clients based on the configuration.
 func NewStore(cfg Config, storeCfg chunk.StoreConfig, schemaCfg chunk.SchemaConfig) (chunk.Store, error) {
 	var caches []cache.Cache
 	if cfg.IndexCacheSize > 0 {
@@ -87,17 +85,6 @@ func NewStore(cfg Config, storeCfg chunk.StoreConfig, schemaCfg chunk.SchemaConf
 	return chunk.NewStore(stores)
 }
 
-func HandleLegacyConfig(legacy chunk.LegacySchemaConfig, schemaCfg chunk.SchemaConfig) {
-	if legacy.ChunkTablesFrom.IsSet() {
-		schemaCfg.ForEachAfter(legacy.ChunkTablesFrom.Time, func(config *chunk.PeriodConfig) {
-			config.Store = "aws-dynamo"
-		})
-	}
-	if legacy.BigtableColumnKeyFrom.IsSet() {
-		// FIXME
-	}
-}
-
 func nameToStorage(name string, cfg Config, schemaCfg chunk.SchemaConfig) (chunk.StorageClient, error) {
 	switch name {
 	case "inmemory":
@@ -124,8 +111,8 @@ func nameToStorage(name string, cfg Config, schemaCfg chunk.SchemaConfig) (chunk
 }
 
 // NewTableClient makes a new table client based on the configuration.
-func NewTableClient(cfg Config) (chunk.TableClient, error) {
-	switch cfg.StorageClient {
+func NewTableClient(name string, cfg Config) (chunk.TableClient, error) {
+	switch name {
 	case "inmemory":
 		return chunk.NewMockStorage(), nil
 	case "aws":
@@ -139,6 +126,6 @@ func NewTableClient(cfg Config) (chunk.TableClient, error) {
 	case "cassandra":
 		return cassandra.NewTableClient(context.Background(), cfg.CassandraStorageConfig)
 	default:
-		return nil, fmt.Errorf("Unrecognized storage client %v, choose one of: aws, gcp, inmemory", cfg.StorageClient)
+		return nil, fmt.Errorf("Unrecognized storage client %v, choose one of: aws, gcp, inmemory", name)
 	}
 }
