@@ -55,9 +55,6 @@ func main() {
 	flag.Parse()
 	chunk_util.QueryParallelism = queryParallelism
 
-	schemaConfig.TranslateConfig().PrintYaml()
-	return
-
 	// Setting the environment variable JAEGER_AGENT_HOST enables tracing
 	trace := tracing.NewFromEnv("querier")
 	defer trace.Close()
