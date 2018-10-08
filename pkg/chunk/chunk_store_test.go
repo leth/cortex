@@ -22,24 +22,21 @@ import (
 	"github.com/weaveworks/common/user"
 )
 
-type storeFactory func(StoreConfig, Schema, StorageClient) (Store, error)
-
 var schemas = []struct {
 	name              string
-	storeFn           storeFactory
 	requireMetricName bool
 }{
-	{"v1", newStore, true},
-	{"v2", newStore, true},
-	{"v3", newStore, true},
-	{"v4", newStore, true},
-	{"v5", newStore, true},
-	{"v6", newStore, true},
-	{"v9", newSeriesStore, true},
+	{"v1", true},
+	{"v2", true},
+	{"v3", true},
+	{"v4", true},
+	{"v5", true},
+	{"v6", true},
+	{"v9", true},
 }
 
 // newTestStore creates a new Store for testing.
-func newTestChunkStore(t *testing.T, schemaName string, storeFactory storeFactory) Store {
+func newTestChunkStore(t *testing.T, schemaName string) Store {
 	var (
 		storeCfg  StoreConfig
 		tbmConfig TableManagerConfig
@@ -203,7 +200,7 @@ func TestChunkStore_Get(t *testing.T) {
 		for _, schema := range schemas {
 			t.Run(fmt.Sprintf("%s / %s", tc.query, schema.name), func(t *testing.T) {
 				t.Log("========= Running query", tc.query, "with schema", schema.name)
-				store := newTestChunkStore(t, schema.name, schema.storeFn)
+				store := newTestChunkStore(t, schema.name)
 				defer store.Stop()
 
 				if err := store.Put(ctx, []Chunk{
@@ -321,7 +318,7 @@ func TestChunkStore_getMetricNameChunks(t *testing.T) {
 		for _, schema := range schemas {
 			t.Run(fmt.Sprintf("%s / %s", tc.query, schema.name), func(t *testing.T) {
 				t.Log("========= Running query", tc.query, "with schema", schema.name)
-				store := newTestChunkStore(t, schema.name, schema.storeFn)
+				store := newTestChunkStore(t, schema.name)
 				defer store.Stop()
 
 				if err := store.Put(ctx, []Chunk{chunk1, chunk2}); err != nil {
@@ -357,7 +354,7 @@ func TestChunkStoreRandom(t *testing.T) {
 
 	for _, schema := range schemas {
 		t.Run(schema.name, func(t *testing.T) {
-			store := newTestChunkStore(t, schema.name, schema.storeFn)
+			store := newTestChunkStore(t, schema.name)
 			defer store.Stop()
 
 			// put 100 chunks from 0 to 99
@@ -421,7 +418,7 @@ func TestChunkStoreRandom(t *testing.T) {
 func TestChunkStoreLeastRead(t *testing.T) {
 	// Test we don't read too much from the index
 	ctx := user.InjectOrgID(context.Background(), userID)
-	store := newTestChunkStore(t, "v6", newStore)
+	store := newTestChunkStore(t, "v6")
 	defer store.Stop()
 
 	// Put 24 chunks 1hr chunks in the store
