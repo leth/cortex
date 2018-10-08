@@ -26,9 +26,10 @@ func main() {
 
 		ingesterConfig ingester.Config
 		storageConfig  storage.Config
-		schemaConfig   chunk.SchemaConfig
+		schemaConfig   chunk.LegacySchemaConfig
+		tbmConfig      chunk.TableManagerConfig
 	)
-	util.RegisterFlags(&ingesterConfig, &serverConfig, &storageConfig, &schemaConfig)
+	util.RegisterFlags(&ingesterConfig, &serverConfig, &storageConfig, &schemaConfig, &tbmConfig)
 	flag.Parse()
 
 	util.InitLogger(&serverConfig)
@@ -42,13 +43,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	tableClient, err := storage.NewTableClient(storageConfig)
+	tableClient, err := storage.NewTableClient(schemaConfig.StorageClient, storageConfig)
 	if err != nil {
 		level.Error(util.Logger).Log("msg", "error initializing DynamoDB table client", "err", err)
 		os.Exit(1)
 	}
 
-	tableManager, err := chunk.NewTableManager(schemaConfig, ingesterConfig.MaxChunkAge, tableClient)
+	tableManager, err := chunk.NewTableManager(tbmConfig, schemaConfig.TranslateConfig(), ingesterConfig.MaxChunkAge, tableClient)
 	if err != nil {
 		level.Error(util.Logger).Log("msg", "error initializing DynamoDB table manager", "err", err)
 		os.Exit(1)
