@@ -81,7 +81,14 @@ func (schemaCfg *LegacySchemaConfig) TranslateConfig() SchemaConfig {
 	config := SchemaConfig{}
 
 	add := func(t string, f model.Time) {
-		config.Configs = append(config.Configs, PeriodConfig{From: f, Schema: t, Store: schemaCfg.StorageClient})
+		config.Configs = append(config.Configs, PeriodConfig{
+			From:   f,
+			Schema: t,
+			Store:  schemaCfg.StorageClient,
+			IndexTables: PeriodicTableConfig{
+				Prefix: schemaCfg.OriginalTableName,
+			},
+		})
 	}
 
 	add("v1", 0)
