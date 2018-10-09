@@ -203,10 +203,10 @@ func (cfg *PeriodConfig) tableForBucket(bucketStart int64) string {
 	return cfg.IndexTables.Prefix + strconv.Itoa(int(bucketStart/int64(cfg.IndexTables.Period/time.Second)))
 }
 
-func loadConfig(filename string) (*SchemaConfig, error) {
+func LoadConfig(filename string) (SchemaConfig, error) {
 	f, err := os.Open(filename)
 	if err != nil {
-		return nil, err
+		return SchemaConfig{}, err
 	}
 
 	var config SchemaConfig
@@ -214,10 +214,10 @@ func loadConfig(filename string) (*SchemaConfig, error) {
 	decoder := yaml.NewDecoder(f)
 	decoder.SetStrict(true)
 	if err := decoder.Decode(&config); err != nil {
-		return nil, err
+		return SchemaConfig{}, err
 	}
 
-	return &config, nil
+	return config, nil
 }
 
 func (s SchemaConfig) PrintYaml() {
