@@ -26,7 +26,7 @@ type PeriodConfig struct {
 	Store       string              `yaml:"store"`
 	Schema      string              `yaml:"schema"`
 	IndexTables PeriodicTableConfig `yaml:"index"`
-	ChunkTables PeriodicTableConfig `yaml:"chunks"`
+	ChunkTables PeriodicTableConfig `yaml:"chunks,omitempty"`
 }
 
 // SchemaConfig contains the config for our chunk index schemas
