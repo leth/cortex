@@ -37,7 +37,7 @@ func main() {
 
 		rulerConfig       ruler.Config
 		chunkStoreConfig  chunk.StoreConfig
-		schemaConfig      chunk.LegacySchemaConfig
+		schemaConfig      chunk.SchemaConfig
 		storageConfig     storage.Config
 		configStoreConfig ruler.ConfigStoreConfig
 		querierConfig     querier.Config
@@ -54,7 +54,7 @@ func main() {
 
 	util.InitLogger(&serverConfig)
 
-	chunkStore, err := storage.NewStore(storageConfig, chunkStoreConfig, schemaConfig.TranslateConfig())
+	chunkStore, err := storage.NewStore(storageConfig, chunkStoreConfig, schemaConfig)
 	if err != nil {
 		level.Error(util.Logger).Log("err", err)
 		os.Exit(1)

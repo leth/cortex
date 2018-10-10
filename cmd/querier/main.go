@@ -44,7 +44,7 @@ func main() {
 		limits            validation.Limits
 		querierConfig     querier.Config
 		chunkStoreConfig  chunk.StoreConfig
-		schemaConfig      chunk.LegacySchemaConfig
+		schemaConfig      chunk.SchemaConfig
 		storageConfig     storage.Config
 		workerConfig      frontend.WorkerConfig
 		queryParallelism  int
@@ -84,7 +84,7 @@ func main() {
 	defer server.Shutdown()
 	server.HTTP.Handle("/ring", r)
 
-	chunkStore, err := storage.NewStore(storageConfig, chunkStoreConfig, schemaConfig.TranslateConfig())
+	chunkStore, err := storage.NewStore(storageConfig, chunkStoreConfig, schemaConfig)
 	if err != nil {
 		level.Error(util.Logger).Log("msg", "error initializing storage client", "err", err)
 		os.Exit(1)

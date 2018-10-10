@@ -42,7 +42,7 @@ func main() {
 			ExcludeRequestInLog: true,
 		}
 		chunkStoreConfig chunk.StoreConfig
-		schemaConfig     chunk.LegacySchemaConfig
+		schemaConfig     chunk.SchemaConfig
 		storageConfig    storage.Config
 		ingesterConfig   ingester.Config
 		preallocConfig   client.PreallocConfig
@@ -79,7 +79,7 @@ func main() {
 	}
 	defer server.Shutdown()
 
-	chunkStore, err := storage.NewStore(storageConfig, chunkStoreConfig, schemaConfig.TranslateConfig())
+	chunkStore, err := storage.NewStore(storageConfig, chunkStoreConfig, schemaConfig)
 	if err != nil {
 		level.Error(util.Logger).Log("err", err)
 		os.Exit(1)

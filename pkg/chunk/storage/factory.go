@@ -63,6 +63,10 @@ func NewStore(cfg Config, storeCfg chunk.StoreConfig, schemaCfg chunk.SchemaConf
 		tieredCache = cache.Instrument("tiered-index", cache.NewTiered(caches))
 	}
 
+	err := schemaCfg.Load()
+	if err != nil {
+		return nil, errors.Wrap(err, "error loading schema config")
+	}
 	stores := []chunk.CompositeStoreEntry{}
 
 	for _, s := range schemaCfg.Configs {
@@ -115,13 +119,13 @@ func NewTableClient(name string, cfg Config) (chunk.TableClient, error) {
 	switch name {
 	case "inmemory":
 		return chunk.NewMockStorage(), nil
-	case "aws":
+	case "aws", "aws-dynamo":
 		path := strings.TrimPrefix(cfg.AWSStorageConfig.DynamoDB.URL.Path, "/")
 		if len(path) > 0 {
 			level.Warn(util.Logger).Log("msg", "ignoring DynamoDB URL path", "path", path)
 		}
 		return aws.NewDynamoDBTableClient(cfg.AWSStorageConfig.DynamoDBConfig)
-	case "gcp":
+	case "gcp", "gcp-columnkey":
 		return gcp.NewTableClient(context.Background(), cfg.GCPStorageConfig)
 	case "cassandra":
 		return cassandra.NewTableClient(context.Background(), cfg.CassandraStorageConfig)

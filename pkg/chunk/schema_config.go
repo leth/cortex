@@ -32,6 +32,9 @@ type PeriodConfig struct {
 // SchemaConfig contains the config for our chunk index schemas
 type SchemaConfig struct {
 	Configs []PeriodConfig `yaml:"configs"`
+
+	fileName string
+	legacy   LegacySchemaConfig // if fileName is set then legacy config is ignored
 }
 
 type LegacySchemaConfig struct {
@@ -57,6 +60,12 @@ type LegacySchemaConfig struct {
 }
 
 // RegisterFlags adds the flags required to config this to the given FlagSet.
+func (cfg *SchemaConfig) RegisterFlags(f *flag.FlagSet) {
+	flag.StringVar(&cfg.fileName, "config-yaml", "", "Schema config yaml")
+	cfg.legacy.RegisterFlags(f)
+}
+
+// RegisterFlags adds the flags required to config this to the given FlagSet.
 func (cfg *LegacySchemaConfig) RegisterFlags(f *flag.FlagSet) {
 	flag.StringVar(&cfg.StorageClient, "chunk.storage-client", "aws", "Which storage client to use (aws, gcp, cassandra, inmemory).")
 	f.Var(&cfg.DailyBucketsFrom, "dynamodb.daily-buckets-from", "The date (in the format YYYY-MM-DD) of the first day for which DynamoDB index buckets should be day-sized vs. hour-sized.")
@@ -77,57 +86,56 @@ func (cfg *LegacySchemaConfig) RegisterFlags(f *flag.FlagSet) {
 }
 
 // translate from command-line parameters into new config data structure
-func (schemaCfg *LegacySchemaConfig) TranslateConfig() SchemaConfig {
-	config := SchemaConfig{}
+func (cfg *SchemaConfig) translate() error {
+	cfg.Configs = []PeriodConfig{}
 
 	add := func(t string, f model.Time) {
-		config.Configs = append(config.Configs, PeriodConfig{
+		cfg.Configs = append(cfg.Configs, PeriodConfig{
 			From:   f,
 			Schema: t,
-			Store:  schemaCfg.StorageClient,
+			Store:  cfg.legacy.StorageClient,
 			IndexTables: PeriodicTableConfig{
-				Prefix: schemaCfg.OriginalTableName,
+				Prefix: cfg.legacy.OriginalTableName,
 			},
 		})
 	}
 
 	add("v1", 0)
 
-	if schemaCfg.DailyBucketsFrom.IsSet() {
-		add("v2", schemaCfg.DailyBucketsFrom.Time)
+	if cfg.legacy.DailyBucketsFrom.IsSet() {
+		add("v2", cfg.legacy.DailyBucketsFrom.Time)
 	}
-	if schemaCfg.Base64ValuesFrom.IsSet() {
-		add("v3", schemaCfg.Base64ValuesFrom.Time)
+	if cfg.legacy.Base64ValuesFrom.IsSet() {
+		add("v3", cfg.legacy.Base64ValuesFrom.Time)
 	}
-	if schemaCfg.V4SchemaFrom.IsSet() {
-		add("v4", schemaCfg.V4SchemaFrom.Time)
+	if cfg.legacy.V4SchemaFrom.IsSet() {
+		add("v4", cfg.legacy.V4SchemaFrom.Time)
 	}
-	if schemaCfg.V5SchemaFrom.IsSet() {
-		add("v5", schemaCfg.V5SchemaFrom.Time)
+	if cfg.legacy.V5SchemaFrom.IsSet() {
+		add("v5", cfg.legacy.V5SchemaFrom.Time)
 	}
-	if schemaCfg.V6SchemaFrom.IsSet() {
-		add("v6", schemaCfg.V6SchemaFrom.Time)
+	if cfg.legacy.V6SchemaFrom.IsSet() {
+		add("v6", cfg.legacy.V6SchemaFrom.Time)
 	}
-	if schemaCfg.V9SchemaFrom.IsSet() {
-		add("v9", schemaCfg.V9SchemaFrom.Time)
+	if cfg.legacy.V9SchemaFrom.IsSet() {
+		add("v9", cfg.legacy.V9SchemaFrom.Time)
 	}
 
-	config.ForEachAfter(schemaCfg.IndexTablesFrom.Time, func(config *PeriodConfig) {
-		config.IndexTables = schemaCfg.IndexTables.clean()
+	cfg.ForEachAfter(cfg.legacy.IndexTablesFrom.Time, func(config *PeriodConfig) {
+		config.IndexTables = cfg.legacy.IndexTables.clean()
 	})
-	if schemaCfg.ChunkTablesFrom.IsSet() {
-		config.ForEachAfter(schemaCfg.ChunkTablesFrom.Time, func(config *PeriodConfig) {
+	if cfg.legacy.ChunkTablesFrom.IsSet() {
+		cfg.ForEachAfter(cfg.legacy.ChunkTablesFrom.Time, func(config *PeriodConfig) {
 			config.Store = "aws-dynamo"
-			config.ChunkTables = schemaCfg.ChunkTables.clean()
+			config.ChunkTables = cfg.legacy.ChunkTables.clean()
 		})
 	}
-	if schemaCfg.BigtableColumnKeyFrom.IsSet() {
-		config.ForEachAfter(schemaCfg.BigtableColumnKeyFrom.Time, func(config *PeriodConfig) {
+	if cfg.legacy.BigtableColumnKeyFrom.IsSet() {
+		cfg.ForEachAfter(cfg.legacy.BigtableColumnKeyFrom.Time, func(config *PeriodConfig) {
 			config.Store = "gcp-columnkey"
 		})
 	}
-
-	return config
+	return nil
 }
 
 func (tableConfig PeriodicTableConfig) clean() PeriodicTableConfig {
@@ -203,21 +211,26 @@ func (cfg *PeriodConfig) tableForBucket(bucketStart int64) string {
 	return cfg.IndexTables.Prefix + strconv.Itoa(int(bucketStart/int64(cfg.IndexTables.Period/time.Second)))
 }
 
-func LoadConfig(filename string) (SchemaConfig, error) {
-	f, err := os.Open(filename)
-	if err != nil {
-		return SchemaConfig{}, err
+func (cfg *SchemaConfig) Load() error {
+	if len(cfg.Configs) > 0 {
+		return nil
+	}
+	if cfg.fileName == "" {
+		return cfg.translate()
 	}
 
-	var config SchemaConfig
+	f, err := os.Open(cfg.fileName)
+	if err != nil {
+		return err
+	}
 
 	decoder := yaml.NewDecoder(f)
 	decoder.SetStrict(true)
-	if err := decoder.Decode(&config); err != nil {
-		return SchemaConfig{}, err
+	if err := decoder.Decode(&cfg); err != nil {
+		return err
 	}
 
-	return config, nil
+	return nil
 }
 
 func (s SchemaConfig) PrintYaml() {
