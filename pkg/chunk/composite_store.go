@@ -27,25 +27,6 @@ type CompositeStoreEntry struct {
 	Store
 }
 
-type byStart []CompositeStoreEntry
-
-func (a byStart) Len() int           { return len(a) }
-func (a byStart) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
-func (a byStart) Less(i, j int) bool { return a[i].start < a[j].start }
-
-// StorageOpt stores when a StorageClient is to be used.
-type StorageOpt struct {
-	From   model.Time
-	Client StorageClient
-}
-
-func latest(a, b model.Time) model.Time {
-	if a.Before(b) {
-		return b
-	}
-	return a
-}
-
 // NewStore creates a new Store which delegates to different stores depending
 // on time.
 func NewStore(stores []CompositeStoreEntry) (Store, error) {
