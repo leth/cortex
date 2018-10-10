@@ -192,17 +192,6 @@ func (cfg PeriodConfig) createSchema() Schema {
 	return s
 }
 
-func NewCompositeStoreEntry(storeCfg StoreConfig, cfg PeriodConfig, storage StorageClient) (CompositeStoreEntry, error) {
-	s := cfg.createSchema()
-	f := newStore
-	switch cfg.Schema {
-	case "v9":
-		f = newSeriesStore
-	}
-	store, err := f(storeCfg, s, storage)
-	return CompositeStoreEntry{start: cfg.From, Store: store}, err
-}
-
 func (cfg *PeriodConfig) tableForBucket(bucketStart int64) string {
 	if cfg.IndexTables.Period == 0 {
 		return cfg.IndexTables.Prefix

@@ -33,6 +33,18 @@ func NewStore(stores []CompositeStoreEntry) (Store, error) {
 	return compositeStore{stores}, nil
 }
 
+// NewCompositeStoreEntry creates a new entry for a period
+func NewCompositeStoreEntry(storeCfg StoreConfig, cfg PeriodConfig, storage StorageClient) (CompositeStoreEntry, error) {
+	s := cfg.createSchema()
+	f := newStore
+	switch cfg.Schema {
+	case "v9":
+		f = newSeriesStore
+	}
+	store, err := f(storeCfg, s, storage)
+	return CompositeStoreEntry{start: cfg.From, Store: store}, err
+}
+
 func (c compositeStore) Put(ctx context.Context, chunks []Chunk) error {
 	for _, chunk := range chunks {
 		err := c.forStores(chunk.From, chunk.Through, func(from, through model.Time, store Store) error {
